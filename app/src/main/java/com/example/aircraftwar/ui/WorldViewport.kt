@@ -1,12 +1,11 @@
 package com.example.aircraftwar.ui
 
 import android.graphics.RectF
-import com.example.aircraftwar.engine.GameConstants
 import kotlin.math.min
 
 data class WorldViewport(
-    val worldWidth: Float = GameConstants.WORLD_WIDTH,
-    val worldHeight: Float = GameConstants.WORLD_HEIGHT
+    val worldWidth: Float,
+    val worldHeight: Float,
 ) {
     
     var scale: Float = 1f

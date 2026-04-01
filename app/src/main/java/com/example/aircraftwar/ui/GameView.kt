@@ -10,7 +10,7 @@ import com.example.aircraftwar.engine.GameEngine
 import com.example.aircraftwar.entity.EntityType
 import kotlin.math.min
 
-data class Renderable(
+data class Drawable(
     val id: Int,
     val type: EntityType,
     val x: Float,
@@ -26,8 +26,8 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         style = Paint.Style.FILL
         isFilterBitmap = true
     }
-    private val viewport = WorldViewport()
     private val sprites = SpriteRepository(context)
+    private val viewport = WorldViewport(engine.config.worldWidth, engine.config.worldHeight)
     
     @Volatile
     private var running = false
@@ -63,7 +63,7 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
         backgroundOffsetPx %= contentHeight
     }
     
-    private fun drawFrame(states: List<Renderable>) {
+    private fun drawFrame(states: List<Drawable>) {
         val canvas: Canvas = holder.lockCanvas() ?: return
         try {
             canvas.drawColor(Color.BLACK)
@@ -103,48 +103,45 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
     }
     
     private fun drawScrollingBackground(canvas: Canvas, contentRect: RectF) {
-        val bg = sprites.background
-        val contentHeight = contentRect.height()
-        if (contentHeight <= 0f) return
+        if (contentRect.height() <= 0f) return
+        
+        val bg = sprites.bg1
+        val offset = backgroundOffsetPx % contentRect.height()
+        val firstRect = RectF(
+            contentRect.left,
+            contentRect.top + offset - contentRect.height(),
+            contentRect.right,
+            contentRect.top + offset
+        )
+        val secondRect = RectF(
+            contentRect.left,
+            contentRect.top + offset,
+            contentRect.right,
+            contentRect.top + offset + contentRect.height()
+        )
         
         canvas.withClip(contentRect) {
-            val offset = backgroundOffsetPx % contentHeight
-            
-            val firstRect = RectF(
-                contentRect.left,
-                contentRect.top + offset - contentHeight,
-                contentRect.right,
-                contentRect.top + offset
-            )
-            val secondRect = RectF(
-                contentRect.left,
-                contentRect.top + offset,
-                contentRect.right,
-                contentRect.top + offset + contentHeight
-            )
-            
             canvas.drawBitmap(bg, null, firstRect, paint)
             canvas.drawBitmap(bg, null, secondRect, paint)
-            
         }
     }
     
-    val EntityType.bitmap
+    private val EntityType.bitmap
         get() = when (this) {
             EntityType.HERO         -> sprites.hero
-            EntityType.MOB_ENEMY    -> sprites.mob
-            EntityType.ELITE_ENEMY  -> sprites.elite
-            EntityType.SUPER_ENEMY  -> sprites.superElite
-            EntityType.BOSS_ENEMY   -> sprites.boss
-            EntityType.HERO_BULLET  -> sprites.heroBullet
-            EntityType.ENEMY_BULLET -> sprites.enemyBullet
-            EntityType.HEALTH_PROP  -> sprites.healthProp
-            EntityType.BOMB_PROP    -> sprites.bombProp
-            EntityType.BULLET_PROP  -> sprites.bulletProp
-            EntityType.SUPER_BULLET_PROP -> sprites.superBulletProp
+            EntityType.MOB_ENEMY    -> sprites.enemyMob
+            EntityType.ELITE_ENEMY  -> sprites.enemyElite
+            EntityType.SUPER_ENEMY  -> sprites.enemySuper
+            EntityType.BOSS_ENEMY   -> sprites.enemyBoss
+            EntityType.HERO_BULLET  -> sprites.bulletHero
+            EntityType.ENEMY_BULLET -> sprites.bulletEnemy
+            EntityType.HEALTH_PROP  -> sprites.propHealth
+            EntityType.BOMB_PROP    -> sprites.propBomb
+            EntityType.ENHANCE_PROP -> sprites.propEnhance
+            EntityType.RAMPAGE_PROP -> sprites.propRampage
         }
     
-    val EntityType.renderScale
+    private val EntityType.renderScale
         get() = when (this) {
             EntityType.HERO         -> 1.8f
             EntityType.MOB_ENEMY    -> 1.7f
@@ -155,8 +152,8 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback,
             EntityType.ENEMY_BULLET -> 1.2f
             EntityType.HEALTH_PROP  -> 2.2f
             EntityType.BOMB_PROP    -> 2.2f
-            EntityType.BULLET_PROP  -> 2.2f
-            EntityType.SUPER_BULLET_PROP -> 2.2f
+            EntityType.ENHANCE_PROP -> 2.2f
+            EntityType.RAMPAGE_PROP -> 2.2f
         }
     
     private fun drawBitmapAspectFit(

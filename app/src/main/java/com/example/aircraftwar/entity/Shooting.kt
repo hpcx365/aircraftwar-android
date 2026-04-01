@@ -8,34 +8,29 @@ fun interface BulletFactory<B : Bullet> {
     fun create(position: Vec, velocity: Vec): B
 }
 
-interface ShootingPattern {
+interface ShootPattern {
     
-    fun <B : Bullet> spawnBullets(origin: Vec, factory: BulletFactory<B>): List<B>
+    fun <B : Bullet> createBullets(origin: Vec, factory: BulletFactory<B>): List<B>
 }
 
-data object Dumb : ShootingPattern {
-    
-    override fun <B : Bullet> spawnBullets(origin: Vec, factory: BulletFactory<B>): List<B> = emptyList()
-}
-
-data class Straight(
+data class StraightPattern(
     val velocity: Float,
     val directionDeg: Float,
-) : ShootingPattern {
+) : ShootPattern {
     
-    override fun <B : Bullet> spawnBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
+    override fun <B : Bullet> createBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
         return listOf(factory.create(origin, degToVec(directionDeg) * velocity))
     }
 }
 
-data class Fan(
+data class FanPattern(
     val count: Int,
     val velocity: Float,
     val directionDeg: Float,
     val fieldDeg: Float,
-) : ShootingPattern {
+) : ShootPattern {
     
-    override fun <B : Bullet> spawnBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
+    override fun <B : Bullet> createBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
         return (0..<count)
             .asSequence()
             .map { it.toFloat() }
@@ -47,13 +42,13 @@ data class Fan(
     }
 }
 
-data class Radial(
+data class RadialPattern(
     val count: Int,
     val velocity: Float,
     val directionDeg: Float
-) : ShootingPattern {
+) : ShootPattern {
     
-    override fun <B : Bullet> spawnBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
+    override fun <B : Bullet> createBullets(origin: Vec, factory: BulletFactory<B>): List<B> {
         return (0..<count)
             .asSequence()
             .map { it.toFloat() }

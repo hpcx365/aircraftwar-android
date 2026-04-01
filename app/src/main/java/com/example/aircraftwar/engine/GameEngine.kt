@@ -1,47 +1,49 @@
 package com.example.aircraftwar.engine
 
 import com.example.aircraftwar.entity.*
-import com.example.aircraftwar.ui.Renderable
+import com.example.aircraftwar.ui.Drawable
 import kotlin.random.Random
 
-class GameEngine {
+class GameEngine(
+    val config: GameConfig = NormalGameConfig
+) {
     
     private var entityIdSeq = 0
     private val entities = mutableMapOf<Int, Entity>()
     
-    private var enemySpawnTimer = 0f
-    private var heroShootTimer = 0f
-    private val enemyShootTimers = mutableMapOf<Int, Float>()
-    
     private val pendingDamage = mutableMapOf<Int, Int>()
     private val pendingDestroy = mutableSetOf<Int>()
-    private val pendingSpawn = mutableListOf<Entity>()
     
-    private var hero = createHero()
-    private var heroTarget = hero.position
+    private var enemySpawnTimer = 0f
+    
+    private var hero: Hero
+    
+    init {
+        hero = createHero()
+        registerEntity(hero)
+    }
     
     fun heroTarget(x: Float, y: Float) {
-        heroTarget = Vec(
-            x.coerceIn(hero.width * 0.5f, GameConstants.WORLD_WIDTH - hero.width * 0.5f),
-            y.coerceIn(hero.height * 0.5f, GameConstants.WORLD_HEIGHT - hero.height * 0.5f)
+        hero.targetPosition = Vec(
+            x.coerceIn(hero.width * 0.5f, config.worldWidth - hero.width * 0.5f),
+            y.coerceIn(hero.height * 0.5f, config.worldHeight - hero.height * 0.5f)
         )
     }
     
     fun tick(dt: Float) {
-        updateHeroMotion(dt)
-        updateEntityMotion(dt)
-        updateHeroShooting(dt)
-        updateEnemyShooting(dt)
-        updateEnemySpawn(dt)
+        heroMove(dt)
+        enemyMove(dt)
+        heroShoot(dt)
+        enemyShoot(dt)
+        enemySpawn(dt)
         resolveCollisions()
         handleBoundaryCleanup()
         applyCombatResults()
-        flushPendingSpawn()
     }
     
-    fun capture(): List<Renderable> {
+    fun capture(): List<Drawable> {
         return entities.values.map {
-            Renderable(
+            Drawable(
                 id = it.id,
                 type = it.type,
                 x = it.position.x,
@@ -53,123 +55,158 @@ class GameEngine {
     }
     
     private fun createHero(): Hero {
-        val hero = Hero(
+        return Hero(
             id = nextId(),
-            position = Vec(GameConstants.WORLD_WIDTH * 0.5f, GameConstants.WORLD_HEIGHT * 0.2f)
+            width = config.heroWidth,
+            height = config.heroHeight,
+            position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
+            maxHp = config.heroHp,
+            shootPattern = StraightPattern(
+                velocity = config.heroBulletSpeed,
+                directionDeg = 90f,
+            ),
         )
-        return registerEntity(hero)
     }
     
-    private fun updateHeroMotion(dt: Float) {
-        val next = hero.position.moveTowards(
-            target = heroTarget,
-            maxDistance = GameConstants.HERO_MOVE_SPEED * dt
+    private fun createMobEnemy(position: Vec, velocity: Vec): MobEnemy {
+        return MobEnemy(
+            id = nextId(),
+            width = config.enemyWidth,
+            height = config.enemyHeight,
+            position = position,
+            velocity = velocity,
+            maxHp = config.enemyHp,
+            shootPattern = null,
         )
-        val safeDt = dt.coerceAtLeast(1e-4f)
-        hero.velocity = Vec(
-            x = (next.x - hero.position.x) / safeDt,
-            y = (next.y - hero.position.y) / safeDt
-        )
-        hero.position = next
     }
     
-    private fun updateEntityMotion(dt: Float) {
+    private fun createEliteEnemy(position: Vec, velocity: Vec): EliteEnemy {
+        return EliteEnemy(
+            id = nextId(),
+            width = config.enemyWidth,
+            height = config.enemyHeight,
+            position = position,
+            velocity = velocity,
+            maxHp = config.enemyHp * 2,
+            shootPattern = StraightPattern(
+                velocity = config.enemyBulletSpeed,
+                directionDeg = -90f,
+            ),
+        )
+    }
+    
+    private fun createSuperEnemy(position: Vec, velocity: Vec): SuperEnemy {
+        return SuperEnemy(
+            id = nextId(),
+            width = config.enemyWidth,
+            height = config.enemyHeight,
+            position = position,
+            velocity = velocity,
+            maxHp = config.enemyHp * 5,
+            shootPattern = FanPattern(
+                count = 4,
+                velocity = config.enemyBulletSpeed,
+                directionDeg = -90f,
+                fieldDeg = 45f,
+            ),
+        )
+    }
+    
+    private fun createBossEnemy(position: Vec, velocity: Vec): BossEnemy {
+        return BossEnemy(
+            id = nextId(),
+            width = config.enemyWidth,
+            height = config.enemyHeight,
+            position = position,
+            velocity = velocity,
+            maxHp = config.enemyHp * 10,
+            shootPattern = RadialPattern(
+                count = 8,
+                velocity = config.enemyBulletSpeed,
+                directionDeg = -90f,
+            )
+        )
+    }
+    
+    private fun createStraightHeroBullet(position: Vec, velocity: Vec): HeroBullet {
+        return HeroBullet(
+            id = nextId(),
+            width = config.bulletWidth,
+            height = config.bulletHeight,
+            position = position,
+            velocity = velocity,
+            power = config.heroPower,
+        )
+    }
+    
+    private fun createStraightEnemyBullet(position: Vec, velocity: Vec): EnemyBullet {
+        return EnemyBullet(
+            id = nextId(),
+            width = config.bulletWidth,
+            height = config.bulletHeight,
+            position = position,
+            velocity = velocity,
+            power = config.enemyPower,
+        )
+    }
+    
+    private fun heroMove(dt: Float) {
+        if (hero.isDead) return
+        hero.position = hero.position.moveTowards(
+            target = hero.targetPosition,
+            maxDistance = config.heroMaxSpeed * dt
+        )
+    }
+    
+    private fun enemyMove(dt: Float) {
         entities.values
             .filterNot { it is Hero }
             .forEach { it.move(dt) }
     }
     
-    private fun updateHeroShooting(dt: Float) {
-        heroShootTimer += dt
-        if (heroShootTimer < GameConstants.HERO_FIRE_INTERVAL_SEC) return
-        heroShootTimer = 0f
+    private fun heroShoot(dt: Float) {
+        if (hero.isDead) return
         
-        hero.shootingPattern
-            .spawnBullets(hero.position) { position, velocity ->
-                StraightHeroBullet(
-                    id = nextId(),
-                    position = position,
-                    velocity = velocity,
-                    power = 1,
-                )
-            }
-            .forEach { scheduleSpawn(it) }
+        hero.shootTimer += dt
+        if (hero.shootTimer < config.heroFireInterval) return
+        hero.shootTimer = 0f
+        
+        hero.shootPattern
+            ?.createBullets(hero.position, ::createStraightHeroBullet)
+            ?.forEach { registerEntity(it) }
     }
     
-    private fun updateEnemyShooting(dt: Float) {
+    private fun enemyShoot(dt: Float) {
         entities.values
             .filterIsInstance<Enemy>()
             .forEach { enemy ->
-                val timer = (enemyShootTimers[enemy.id] ?: 0f) + dt
-                if (timer < GameConstants.ENEMY_FIRE_INTERVAL_SEC) {
-                    enemyShootTimers[enemy.id] = timer
-                    return@forEach
-                }
-                enemyShootTimers[enemy.id] = 0f
-                enemy.shootingPattern
-                    .spawnBullets(enemy.position) { position, velocity ->
-                        StraightEnemyBullet(
-                            id = nextId(),
-                            position = position,
-                            velocity = velocity,
-                            power = 1,
-                        )
-                    }
-                    .forEach { scheduleSpawn(it) }
+                enemy.shootTimer += dt
+                if (enemy.shootTimer < config.enemyFireInterval) return@forEach
+                enemy.shootTimer = 0f
+                
+                enemy.shootPattern
+                    ?.createBullets(enemy.position, ::createStraightEnemyBullet)
+                    ?.forEach { registerEntity(it) }
             }
     }
     
-    private fun updateEnemySpawn(dt: Float) {
+    private fun enemySpawn(dt: Float) {
         enemySpawnTimer += dt
-        if (enemySpawnTimer < GameConstants.ENEMY_SPAWN_INTERVAL_SEC) return
+        if (enemySpawnTimer < config.enemySpawnInterval) return
         enemySpawnTimer = 0f
         
-        val x = Random.nextFloat() * (GameConstants.WORLD_WIDTH - GameConstants.ENEMY_WIDTH) + GameConstants.ENEMY_WIDTH * 0.5f
-        val y = GameConstants.WORLD_HEIGHT + GameConstants.ENEMY_HEIGHT * 0.5f
+        val x = Random.nextFloat() * (config.worldWidth - config.enemyWidth) + config.enemyWidth * 0.5f
+        val y = config.worldHeight + config.enemyHeight * 0.5f
+        val vy = randomIn(config.enemyMinSpeed, config.enemyMaxSpeed)
         val roll = Random.nextFloat()
-        val enemy: Enemy = when {
-            roll < 0.60f -> {
-                val speedY = randomIn(GameConstants.ENEMY_MIN_SPEED, GameConstants.ENEMY_MAX_SPEED)
-                MobEnemy(
-                    id = nextId(),
-                    position = Vec(x, y),
-                    velocity = Vec(0f, -speedY)
-                )
+        registerEntity(
+            when {
+                roll < 0.60f -> createMobEnemy(Vec(x, y), Vec(0f, -vy))
+                roll < 0.82f -> createEliteEnemy(Vec(x, y), Vec(0f, -vy))
+                roll < 0.95f -> createSuperEnemy(Vec(x, y), Vec(0f, -vy))
+                else         -> createBossEnemy(Vec(x, y), Vec(0f, -vy))
             }
-            
-            roll < 0.82f -> {
-                val speedY = randomIn(
-                    GameConstants.ENEMY_MIN_SPEED * 0.9f,
-                    GameConstants.ENEMY_MAX_SPEED * 0.95f
-                )
-                EliteEnemy(
-                    id = nextId(),
-                    position = Vec(x, y),
-                    velocity = Vec(0f, -speedY)
-                )
-            }
-            
-            roll < 0.95f -> {
-                val speedY = randomIn(
-                    GameConstants.ENEMY_MIN_SPEED * 0.85f,
-                    GameConstants.ENEMY_MAX_SPEED * 0.9f
-                )
-                SuperEliteEnemy(
-                    id = nextId(),
-                    position = Vec(x, y),
-                    velocity = Vec(0f, -speedY)
-                )
-            }
-            
-            else -> {
-                BossEnemy(
-                    id = nextId(),
-                    position = Vec(x, y),
-                    velocity = Vec(0f, -0.8f)
-                )
-            }
-        }
-        registerEntity(enemy)
+        )
     }
     
     private fun resolveCollisions() {
@@ -228,9 +265,9 @@ class GameEngine {
         
         when (prop) {
             is HealthProp      -> hero.increaseHp(3)
-            is BulletProp      -> {}
-            is SuperBulletProp -> {}
-            is BombProp        -> {
+            is EnhanceProp -> {}
+            is RampageProp -> {}
+            is BombProp    -> {
                 entities.values
                     .filterIsInstance<Enemy>()
                     .forEach { scheduleDestroy(it) }
@@ -246,8 +283,8 @@ class GameEngine {
         if (hero.id in pendingDestroy) return
         if (enemy.id in pendingDestroy) return
         
-        scheduleDamage(hero, enemy.touchDamage)
-        scheduleDestroy(enemy)
+        scheduleDamage(hero, enemy.hp)
+        scheduleDamage(enemy, enemy.hp)
     }
     
     private fun applyCombatResults() {
@@ -260,32 +297,20 @@ class GameEngine {
         }
         pendingDamage.clear()
         
-        pendingDestroy.toList().forEach {
-            val removed = entities.remove(it) ?: return@forEach
-            enemyShootTimers.remove(it)
-            
-            if (removed is Hero) hero = createHero()
-        }
+        pendingDestroy.forEach { entities.remove(it) }
         pendingDestroy.clear()
     }
     
     private fun handleBoundaryCleanup() {
         entities.values
-            .filter { it.isOutOfWorld() }
+            .filter { it.isOutOfWorld(config.worldWidth, config.worldHeight) }
             .forEach { scheduleDestroy(it) }
-    }
-    
-    private fun flushPendingSpawn() {
-        if (pendingSpawn.isEmpty()) return
-        pendingSpawn.forEach { registerEntity(it) }
-        pendingSpawn.clear()
     }
     
     private fun nextId(): Int = entityIdSeq++
     
-    private fun <T : Entity> registerEntity(obj: T): T {
+    private fun <T : Entity> registerEntity(obj: T) {
         entities[obj.id] = obj
-        return obj
     }
     
     private fun scheduleDamage(target: Aircraft, damage: Int) {
@@ -294,10 +319,6 @@ class GameEngine {
     
     private fun scheduleDestroy(obj: Entity) {
         pendingDestroy += obj.id
-    }
-    
-    private fun scheduleSpawn(obj: Entity) {
-        pendingSpawn += obj
     }
     
     private fun randomIn(min: Float, max: Float): Float {

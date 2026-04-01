@@ -23,16 +23,6 @@ data class Vec(
     operator fun times(that: Vec): Vec = Vec(x * that.x, y * that.y)
     operator fun div(that: Vec): Vec = Vec(x / that.x, y / that.y)
     
-    fun rotateDegree(angle: Float): Vec = rotateRadian(angle * PI.toFloat() / 180f)
-    fun rotateRadian(angle: Float): Vec {
-        val cos = cos(angle)
-        val sin = sin(angle)
-        return Vec(
-            x * cos - y * sin,
-            x * sin + y * cos
-        )
-    }
-    
     fun moveTowards(target: Vec, maxDistance: Float): Vec {
         val dx = target.x - x
         val dy = target.y - y
