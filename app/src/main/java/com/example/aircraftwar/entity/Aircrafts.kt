@@ -1,9 +1,11 @@
 package com.example.aircraftwar.entity
 
+import com.example.aircraftwar.engine.PlayerId
 import com.example.aircraftwar.engine.Vec
 
 data class Hero(
     override val id: Int,
+    val ownerPlayerId: PlayerId,
     override val width: Float,
     override val height: Float,
     override var position: Vec,
@@ -11,7 +13,6 @@ data class Hero(
     override var hp: Int = maxHp,
     override var shootTimer: Float = 0f,
     override var shootPattern: ShootPattern?,
-    var targetPosition: Vec = position
 ) : Aircraft {
     
     override val velocity: Vec = Vec(0f, 0f)
@@ -46,7 +47,7 @@ data class SuperEnemy(
     override val width: Float,
     override val height: Float,
     override var position: Vec,
-    override val velocity: Vec,
+    override var velocity: Vec,
     override val maxHp: Int,
     override var hp: Int = maxHp,
     override var shootTimer: Float = 0f,
@@ -62,5 +63,5 @@ data class BossEnemy(
     override val maxHp: Int,
     override var hp: Int = maxHp,
     override var shootTimer: Float = 0f,
-    override var shootPattern: ShootPattern?,
+    override val shootPattern: ShootPattern?,
 ) : Enemy

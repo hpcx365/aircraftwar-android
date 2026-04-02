@@ -6,15 +6,29 @@ interface GameConfig {
     val worldHeight: Float
     val heroWidth: Float
     val heroHeight: Float
-    val enemyWidth: Float
-    val enemyHeight: Float
-    val bulletWidth: Float
-    val bulletHeight: Float
+    val mobEnemyWidth: Float
+    val mobEnemyHeight: Float
+    val eliteEnemyWidth: Float
+    val eliteEnemyHeight: Float
+    val superEnemyWidth: Float
+    val superEnemyHeight: Float
+    val bossEnemyWidth: Float
+    val bossEnemyHeight: Float
+    val heroBulletWidth: Float
+    val heroBulletHeight: Float
+    val enemyBulletWidth: Float
+    val enemyBulletHeight: Float
     val propWidth: Float
     val propHeight: Float
     
+    val enemySpawnY: Float
+    val enemySpawnWidth: Float
+    
     val heroHp: Int
-    val enemyHp: Int
+    val mobEnemyHp: Int
+    val eliteEnemyHp: Int
+    val superEnemyHp: Int
+    val bossEnemyHp: Int
     val heroPower: Int
     val enemyPower: Int
     
@@ -23,37 +37,152 @@ interface GameConfig {
     val enemyMaxSpeed: Float
     val heroBulletSpeed: Float
     val enemyBulletSpeed: Float
+    val propFallSpeed: Float
+    val superEnemyLateralSpeed: Float
+    val bossEntrySpeed: Float
+    val bossLateralSpeed: Float
+    val bossCruiseY: Float
     
     val heroFireInterval: Float
     val enemyFireInterval: Float
     val enemySpawnInterval: Float
+    
+    val healthPropHealRatio: Float
+    val enhanceDuration: Float
+    val rampageDuration: Float
+    val enhanceBulletCount: Int
+    val enhanceFieldDeg: Float
+    val enhanceDamageMultiplier: Int
+    val rampageBulletCount: Int
+    val rampageDamageMultiplier: Int
+    val rampageFireIntervalMultiplier: Float
+    val bombDamageRatio: Float
+    
+    val mobEnemyScore: Int
+    val eliteEnemyScore: Int
+    val superEnemyScore: Int
+    val bossEnemyScore: Int
+    
+    val propWeightHealth: Int
+    val propWeightEnhance: Int
+    val propWeightRampage: Int
+    val propWeightBomb: Int
 }
 
-object NormalGameConfig : GameConfig {
+enum class GameDifficulty(
+    val displayName: String,
+    val config: GameConfig,
+) {
     
-    override val worldWidth: Float = 12f
-    override val worldHeight: Float = 20f
-    override val heroWidth: Float = 0.72f
-    override val heroHeight: Float = 0.72f
-    override val enemyWidth: Float = 0.6f
-    override val enemyHeight: Float = 0.6f
-    override val bulletWidth: Float = 0.2f
-    override val bulletHeight: Float = 0.4f
-    override val propWidth: Float = 0.3f
-    override val propHeight: Float = 0.3f
+    EASY("简单", EasyGameConfig),
+    NORMAL("普通", NormalGameConfig),
+    HARD("困难", HardGameConfig),
+}
+
+abstract class BaseGameConfig : GameConfig {
+    
+    override val worldWidth = 12f
+    override val worldHeight = 20f
+    override val heroWidth = 1.00f
+    override val heroHeight = 1.00f
+    override val mobEnemyWidth = 1.00f
+    override val mobEnemyHeight = 1.00f
+    override val eliteEnemyWidth = 1.50f
+    override val eliteEnemyHeight = 1.20f
+    override val superEnemyWidth = 2.00f
+    override val superEnemyHeight = 1.80f
+    override val bossEnemyWidth = 3.00f
+    override val bossEnemyHeight = 2.00f
+    override val heroBulletWidth = 0.20f
+    override val heroBulletHeight = 0.40f
+    override val enemyBulletWidth = 0.20f
+    override val enemyBulletHeight = 0.40f
+    override val propWidth = 0.80f
+    override val propHeight = 0.80f
+    
+    override val enemySpawnY = 24f
+    override val enemySpawnWidth = 10f
     
     override val heroHp: Int = 10
-    override val enemyHp: Int = 3
     override val heroPower: Int = 1
+    
+    override val heroMaxSpeed = 18f
+    override val heroBulletSpeed = 15f
+    override val propFallSpeed = 3.2f
+    override val superEnemyLateralSpeed = 1.2f
+    override val bossEntrySpeed = 1.6f
+    override val bossLateralSpeed = 2.4f
+    override val bossCruiseY = worldHeight * 0.75f
+    
+    override val healthPropHealRatio = 0.5f
+    override val enhanceDuration = 3f
+    override val rampageDuration = 5f
+    override val enhanceBulletCount = 3
+    override val enhanceFieldDeg = 30f
+    override val enhanceDamageMultiplier = 2
+    override val rampageBulletCount = 16
+    override val rampageDamageMultiplier = 2
+    override val rampageFireIntervalMultiplier = 0.5f
+    override val bombDamageRatio = 0.5f
+    
+    override val mobEnemyScore = 10
+    override val eliteEnemyScore = 20
+    override val superEnemyScore = 50
+    override val bossEnemyScore = 100
+    
+    override val propWeightHealth = 3
+    override val propWeightEnhance = 3
+    override val propWeightRampage = 2
+    override val propWeightBomb = 1
+}
+
+object EasyGameConfig : BaseGameConfig() {
+    
+    override val mobEnemyHp: Int = 4
+    override val eliteEnemyHp: Int = 8
+    override val superEnemyHp: Int = 16
+    override val bossEnemyHp: Int = 80
     override val enemyPower: Int = 1
     
-    override val heroMaxSpeed: Float = 18f
-    override val enemyMinSpeed: Float = 1.0f
-    override val enemyMaxSpeed: Float = 2.0f
-    override val heroBulletSpeed: Float = 15f
-    override val enemyBulletSpeed: Float = 10f
+    override val enemyMinSpeed = 0.9f
+    override val enemyMaxSpeed = 1.3f
+    override val enemyBulletSpeed = 9f
     
-    override val heroFireInterval: Float = 0.25f
-    override val enemyFireInterval: Float = 1.2f
-    override val enemySpawnInterval: Float = 1.0f
+    override val heroFireInterval = 0.25f
+    override val enemyFireInterval = 2.4f
+    override val enemySpawnInterval = 1.20f
+}
+
+object NormalGameConfig : BaseGameConfig() {
+    
+    override val mobEnemyHp: Int = 5
+    override val eliteEnemyHp: Int = 10
+    override val superEnemyHp: Int = 20
+    override val bossEnemyHp: Int = 100
+    override val enemyPower: Int = 1
+    
+    override val enemyMinSpeed = 1.0f
+    override val enemyMaxSpeed = 1.5f
+    override val enemyBulletSpeed = 10f
+    
+    override val heroFireInterval = 0.25f
+    override val enemyFireInterval = 2.0f
+    override val enemySpawnInterval = 1.0f
+}
+
+object HardGameConfig : BaseGameConfig() {
+    
+    override val mobEnemyHp: Int = 7
+    override val eliteEnemyHp: Int = 14
+    override val superEnemyHp: Int = 28
+    override val bossEnemyHp: Int = 140
+    override val enemyPower: Int = 2
+    
+    override val enemyMinSpeed = 1.2f
+    override val enemyMaxSpeed = 1.8f
+    override val enemyBulletSpeed = 11f
+    
+    override val heroFireInterval = 0.25f
+    override val enemyFireInterval = 1.5f
+    override val enemySpawnInterval = 0.75f
 }

@@ -41,8 +41,8 @@ sealed interface Entity {
     var position: Vec
     val velocity: Vec
     
-    val top: Float get() = position.x + height * 0.5f
-    val bottom: Float get() = position.x - height * 0.5f
+    val top: Float get() = position.y + height * 0.5f
+    val bottom: Float get() = position.y - height * 0.5f
     val left: Float get() = position.x - width * 0.5f
     val right: Float get() = position.x + width * 0.5f
     val bounds: Rect get() = Rect(position.x, position.y, width, height)
