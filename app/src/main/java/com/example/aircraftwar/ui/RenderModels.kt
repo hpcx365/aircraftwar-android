@@ -1,5 +1,6 @@
 package com.example.aircraftwar.ui
 
+import com.example.aircraftwar.engine.GameEvent
 import com.example.aircraftwar.entity.EntityType
 
 data class Drawable(
@@ -14,9 +15,11 @@ data class Drawable(
 )
 
 data class FrameSnapshot(
-    val drawables: List<Drawable>,
-    val score: Int,
+    val scoreRed: Int?,
+    val scoreBlue: Int?,
     val elapsedTimeSec: Float,
     val hasBoss: Boolean,
     val gameOver: Boolean,
+    val events: List<GameEvent>,
+    val drawables: List<Drawable>,
 )

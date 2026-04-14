@@ -3,34 +3,21 @@ package com.example.aircraftwar.entity
 import com.example.aircraftwar.engine.Rect
 import com.example.aircraftwar.engine.Vec
 
-enum class EntityType {
-    
-    HERO,
-    MOB_ENEMY,
-    ELITE_ENEMY,
-    SUPER_ENEMY,
-    BOSS_ENEMY,
-    HERO_BULLET,
-    ENEMY_BULLET,
-    HEALTH_PROP,
-    ENHANCE_PROP,
-    RAMPAGE_PROP,
-    BOMB_PROP,
-}
-
 val Entity.type: EntityType
     get() = when (this) {
-        is Hero        -> EntityType.HERO
-        is MobEnemy    -> EntityType.MOB_ENEMY
-        is EliteEnemy  -> EntityType.ELITE_ENEMY
-        is SuperEnemy  -> EntityType.SUPER_ENEMY
-        is BossEnemy   -> EntityType.BOSS_ENEMY
-        is HeroBullet  -> EntityType.HERO_BULLET
-        is EnemyBullet -> EntityType.ENEMY_BULLET
-        is HealthProp  -> EntityType.HEALTH_PROP
-        is EnhanceProp -> EntityType.ENHANCE_PROP
-        is RampageProp -> EntityType.RAMPAGE_PROP
-        is BombProp    -> EntityType.BOMB_PROP
+        is RedHero        -> EntityType.RED_HERO
+        is BlueHero       -> EntityType.BLUE_HERO
+        is MobEnemy       -> EntityType.MOB_ENEMY
+        is EliteEnemy     -> EntityType.ELITE_ENEMY
+        is SuperEnemy     -> EntityType.SUPER_ENEMY
+        is BossEnemy      -> EntityType.BOSS_ENEMY
+        is RedHeroBullet  -> EntityType.RED_HERO_BULLET
+        is BlueHeroBullet -> EntityType.BLUE_HERO_BULLET
+        is EnemyBullet    -> EntityType.ENEMY_BULLET
+        is HealthProp     -> EntityType.HEALTH_PROP
+        is EnhanceProp    -> EntityType.ENHANCE_PROP
+        is RampageProp    -> EntityType.RAMPAGE_PROP
+        is BombProp       -> EntityType.BOMB_PROP
     }
 
 sealed interface Entity {
@@ -70,16 +57,15 @@ sealed interface Aircraft : Entity {
     val maxHp: Int
     var shootTimer: Float
     val shootPattern: ShootPattern?
+}
+
+sealed interface Hero : Aircraft {
     
-    fun takeDamage(amount: Int) {
-        hp = (hp - amount).coerceAtLeast(0)
-    }
-    
-    fun increaseHp(amount: Int) {
-        hp = (hp + amount).coerceAtMost(maxHp)
-    }
-    
-    val isDead: Boolean get() = hp <= 0
+    val playerId: String
+    var score: Int
+    var enhanceTimer: Float
+    var rampageTimer: Float
+    var targetPosition: Vec?
 }
 
 sealed interface Enemy : Aircraft
@@ -88,5 +74,7 @@ sealed interface Bullet : Entity {
     
     val power: Int
 }
+
+sealed interface HeroBullet : Bullet
 
 sealed interface Prop : Entity

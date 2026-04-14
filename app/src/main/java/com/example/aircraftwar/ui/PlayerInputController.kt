@@ -1,44 +1,38 @@
 package com.example.aircraftwar.ui
 
 import android.view.MotionEvent
-import com.example.aircraftwar.engine.*
+import com.example.aircraftwar.engine.PlayerCommand
+import com.example.aircraftwar.engine.PlayerMoveCommand
+import com.example.aircraftwar.engine.Vec
 
 interface PlayerInputController {
     
-    fun onMotionEvent(event: MotionEvent, viewport: WorldViewport): List<GameCommand>
+    fun onMotionEvent(event: MotionEvent, viewport: WorldViewport): List<PlayerCommand>
 }
 
 class TouchPlayerInputController(
-    private val playerId: PlayerId = PlayerId.LOCAL,
+    private val playerId: String,
 ) : PlayerInputController {
     
-    private var nextSequence = 0L
+    private var nextSequence = 1
     
-    override fun onMotionEvent(event: MotionEvent, viewport: WorldViewport): List<GameCommand> {
+    override fun onMotionEvent(event: MotionEvent, viewport: WorldViewport): List<PlayerCommand> {
         return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN,
             MotionEvent.ACTION_MOVE -> {
-                if (!viewport.containsScreenPoint(event.x, event.y)) {
-                    emptyList()
-                } else {
-                    val target = Vec(
-                        x = viewport.screenToWorldX(event.x),
-                        y = viewport.screenToWorldY(event.y),
+                val target = Vec(
+                    x = viewport.screenToWorldX(event.x),
+                    y = viewport.screenToWorldY(event.y),
+                )
+                listOf(
+                    PlayerMoveCommand(
+                        playerId = playerId,
+                        sequence = nextSequence++,
+                        targetPosition = target,
                     )
-                    listOf(
-                        UpdatePlayerIntent(
-                            playerId = playerId,
-                            sequence = nextSequence++,
-                            intent = PlayerIntent(
-                                moveTarget = target,
-                                primaryFirePressed = true,
-                            ),
-                        )
-                    )
-                }
+                )
             }
-            
-            else                    -> emptyList()
+            else -> emptyList()
         }
     }
 }

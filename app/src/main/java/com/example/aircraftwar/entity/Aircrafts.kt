@@ -1,21 +1,43 @@
 package com.example.aircraftwar.entity
 
-import com.example.aircraftwar.engine.PlayerId
 import com.example.aircraftwar.engine.Vec
 
-data class Hero(
+data class RedHero(
     override val id: Int,
-    val ownerPlayerId: PlayerId,
+    override val playerId: String,
+    override var score: Int = 0,
     override val width: Float,
     override val height: Float,
     override var position: Vec,
     override var maxHp: Int,
     override var hp: Int = maxHp,
     override var shootTimer: Float = 0f,
-    override var shootPattern: ShootPattern?,
-) : Aircraft {
+    override var enhanceTimer: Float = 0f,
+    override var rampageTimer: Float = 0f,
+    override var targetPosition: Vec? = null,
+) : Hero {
     
     override val velocity: Vec = Vec(0f, 0f)
+    override val shootPattern: ShootPattern? = null
+}
+
+data class BlueHero(
+    override val id: Int,
+    override val playerId: String,
+    override var score: Int = 0,
+    override val width: Float,
+    override val height: Float,
+    override var position: Vec,
+    override var maxHp: Int,
+    override var hp: Int = maxHp,
+    override var shootTimer: Float = 0f,
+    override var enhanceTimer: Float = 0f,
+    override var rampageTimer: Float = 0f,
+    override var targetPosition: Vec? = null,
+) : Hero {
+    
+    override val velocity: Vec = Vec(0f, 0f)
+    override val shootPattern: ShootPattern? = null
 }
 
 data class MobEnemy(

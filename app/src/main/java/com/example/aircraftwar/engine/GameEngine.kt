@@ -1,293 +1,387 @@
 package com.example.aircraftwar.engine
 
 import com.example.aircraftwar.entity.*
-import kotlin.math.abs
-import kotlin.math.roundToInt
+import com.example.aircraftwar.ui.Drawable
+import com.example.aircraftwar.ui.FrameSnapshot
+import kotlin.math.*
 import kotlin.random.Random
 
 class GameEngine(
     val config: GameConfig = NormalGameConfig
 ) {
     
-    private enum class PropKind {
-        HEALTH,
-        ENHANCE,
-        RAMPAGE,
-        BOMB,
-    }
-    
-    private data class PendingDamage(
-        var totalDamage: Int = 0,
-        var sourceType: DamageSourceType = DamageSourceType.UNKNOWN,
-    )
-    
-    private data class PlayerRuntimeState(
-        var heroId: Int? = null,
-        var lastSequence: Long = Long.MIN_VALUE,
-        var intent: PlayerIntent = PlayerIntent(),
-    )
-    
     private var entityIdSeq = 0
     private val entities = linkedMapOf<Int, Entity>()
-    private val players = linkedMapOf<PlayerId, PlayerRuntimeState>()
+    private var redHero: RedHero? = null
+    private var blueHero: BlueHero? = null
     
-    private val pendingDamage = mutableMapOf<Int, PendingDamage>()
-    private val pendingDestroyReasons = mutableMapOf<Int, DestroyReason>()
-    private val pendingEvents = mutableListOf<GameEvent>()
-    private val recentlyDestroyedEntityTypes = mutableMapOf<Int, EntityType>()
-    
-    private val commandLock = Any()
-    private val commandQueue = ArrayDeque<GameCommand>()
+    private var redHeroJoined = false
+    private var blueHeroJoined = false
+    private val commandQueue = ArrayDeque<PlayerCommand>()
     
     private var enemySpawnTimer = 0f
-    private var heroEnhanceTimer = 0f
-    private var heroRampageTimer = 0f
-    private var score = 0
     private var elapsedTimeSec = 0f
+    private val events = ArrayList<GameEvent>()
     
-    private var lastEnhanceActive = false
-    private var lastRampageActive = false
-    
-    @Volatile
-    private var gameOver = false
-    
-    private var hero: Hero?
-    
-    init {
-        val hero = createHero(PlayerId.LOCAL)
-        registerEntity(hero)
-        this.hero = hero
+    fun isGameStarted(): Boolean {
+        return redHeroJoined || blueHeroJoined
     }
     
-    fun submitCommand(command: GameCommand) {
-        synchronized(commandLock) {
-            commandQueue.add(command)
-        }
+    fun isGameOver(): Boolean {
+        return isGameStarted() && (!redHeroJoined || redHero == null) && (!blueHeroJoined || blueHero == null)
     }
     
-    fun tick(dt: Float) {
-        if (gameOver) return
-        
-        val safeDt = dt.coerceAtLeast(0f)
-        elapsedTimeSec += safeDt
-        applyPendingCommands()
-        updateHeroBuffs(safeDt)
-        entityMove(safeDt)
-        aircraftShoot(safeDt)
-        enemySpawn(safeDt)
+    fun submitCommand(command: PlayerCommand) {
+        commandQueue.add(command)
+    }
+    
+    fun update(dt: Float) {
+        applyCommands()
+        clearEvents()
+        moveHero(redHero, dt)
+        moveHero(blueHero, dt)
+        moveEntity(dt)
+        updateHeroTimers(redHero, dt)
+        updateHeroTimers(blueHero, dt)
+        heroShoot(redHero)
+        heroShoot(blueHero)
+        enemyShoot(dt)
+        spawnEnemy(dt)
         resolveCollisions()
-        handleBoundaryCleanup()
-        applyCombatResults()
-        emitBuffStateChanges()
+        boundaryCleanup()
+        elapsedTimeSec += dt
+        if (isGameOver()) {
+            emitEvent(GameEvent.GAME_OVER)
+        }
     }
     
-    fun captureState(): GameStateSnapshot {
-        val hero = hero
-        return GameStateSnapshot(
-            worldWidth = config.worldWidth,
-            worldHeight = config.worldHeight,
+    fun snapshot(): FrameSnapshot {
+        return FrameSnapshot(
+            scoreRed = redHero?.score,
+            scoreBlue = blueHero?.score,
             elapsedTimeSec = elapsedTimeSec,
-            score = score,
-            hasBoss = entities.values.any { it is BossEnemy && it.id !in pendingDestroyReasons },
-            gameOver = hero == null || gameOver,
-            entities = entities.values.map { entity ->
-                val aircraft = entity as? Aircraft
-                EntitySnapshot(
-                    id = entity.id,
-                    type = entity.type,
-                    x = entity.position.x,
-                    y = entity.position.y,
-                    width = entity.width,
-                    height = entity.height,
-                    hp = aircraft?.hp,
-                    maxHp = aircraft?.maxHp,
-                    ownerPlayerId = (entity as? Hero)?.ownerPlayerId,
-                )
-            },
-            players = players.map { (playerId, runtime) ->
-                PlayerSnapshot(
-                    playerId = playerId,
-                    heroEntityId = runtime.heroId,
-                    alive = runtime.heroId != null && entities.containsKey(runtime.heroId),
-                    moveTarget = runtime.intent.moveTarget,
-                )
-            },
-            activeBuffs = buildList {
-                if (heroEnhanceTimer > 0f) {
-                    add(BuffSnapshot(PlayerId.LOCAL, BuffType.ENHANCE, heroEnhanceTimer))
+            hasBoss = entities.values.any { it is BossEnemy },
+            gameOver = isGameOver(),
+            events = ArrayList(events),
+            drawables = entities.values.map {
+                when (it) {
+                    is Aircraft -> Drawable(
+                        id = it.id,
+                        type = it.type,
+                        x = it.position.x,
+                        y = it.position.y,
+                        width = it.width,
+                        height = it.height,
+                        hp = it.hp,
+                        maxHp = it.maxHp,
+                    )
+                    else -> Drawable(
+                        id = it.id,
+                        type = it.type,
+                        x = it.position.x,
+                        y = it.position.y,
+                        width = it.width,
+                        height = it.height,
+                    )
                 }
-                if (heroRampageTimer > 0f) {
-                    add(BuffSnapshot(PlayerId.LOCAL, BuffType.RAMPAGE, heroRampageTimer))
-                }
-            }
+            },
         )
     }
     
-    fun pollEvents(): List<GameEvent> {
-        if (pendingEvents.isEmpty()) return emptyList()
-        val copy = pendingEvents.toList()
-        pendingEvents.clear()
-        return copy
+    private fun clearEvents() {
+        events.clear()
     }
     
-    fun isGameOver(): Boolean = gameOver
-    
-    private fun applyPendingCommands() {
-        val drained = mutableListOf<GameCommand>()
-        synchronized(commandLock) {
-            while (commandQueue.isNotEmpty()) {
-                drained += commandQueue.removeFirst()
+    private fun applyCommands() {
+        var redPlayerCommand: PlayerCommand? = null
+        var bluePlayerCommand: PlayerCommand? = null
+        
+        while (commandQueue.isNotEmpty()) {
+            when (val command = commandQueue.removeFirst()) {
+                is PlayerJoinRedCommand -> {
+                    if (!redHeroJoined && redPlayerCommand == null) {
+                        redPlayerCommand = command
+                    }
+                }
+                is PlayerJoinBlueCommand -> {
+                    if (!blueHeroJoined && bluePlayerCommand == null) {
+                        bluePlayerCommand = command
+                    }
+                }
+                else -> {
+                    when (command.playerId) {
+                        redHero?.playerId -> {
+                            if (command.sequence > (redPlayerCommand?.sequence ?: -1)) {
+                                redPlayerCommand = command
+                            }
+                        }
+                        blueHero?.playerId -> {
+                            if (command.sequence > (bluePlayerCommand?.sequence ?: -1)) {
+                                bluePlayerCommand = command
+                            }
+                        }
+                    }
+                }
             }
         }
-        drained.forEach { command ->
-            val runtime = players.getOrPut(command.playerId) { PlayerRuntimeState() }
-            if (command.sequence <= runtime.lastSequence) return@forEach
-            runtime.lastSequence = command.sequence
-            when (command) {
-                is UpdatePlayerIntent -> runtime.intent = command.intent
+        
+        if (redPlayerCommand != null) applyRedPlayerCommand(redPlayerCommand)
+        if (bluePlayerCommand != null) applyBluePlayerCommand(bluePlayerCommand)
+    }
+    
+    private fun applyRedPlayerCommand(command: PlayerCommand) {
+        when (command) {
+            is PlayerJoinRedCommand -> {
+                if (redHeroJoined) throw IllegalStateException()
+                redHeroJoined = true
+                createRedHero(command.playerId)
+            }
+            is PlayerJoinBlueCommand -> {
+                throw IllegalStateException()
+            }
+            is PlayerMoveCommand -> {
+                val hero = redHero ?: return
+                hero.targetPosition = command.targetPosition
+            }
+            is PlayerStopCommand -> {
+                val hero = redHero ?: return
+                hero.targetPosition = null
+            }
+            is PlayerLeaveCommand -> {
+                val hero = redHero ?: return
+                unregisterEntity(hero)
             }
         }
     }
     
-    private fun createHero(playerId: PlayerId): Hero {
-        return Hero(
-            id = nextId(),
-            ownerPlayerId = playerId,
-            width = config.heroWidth,
-            height = config.heroHeight,
-            position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
-            maxHp = config.heroHp,
-            shootPattern = StraightPattern(
-                velocity = config.heroBulletSpeed,
-                directionDeg = 90f,
-            ),
-        )
+    private fun applyBluePlayerCommand(command: PlayerCommand) {
+        when (command) {
+            is PlayerJoinRedCommand -> {
+                throw IllegalStateException()
+            }
+            is PlayerJoinBlueCommand -> {
+                if (blueHeroJoined) throw IllegalStateException()
+                blueHeroJoined = true
+                createBlueHero(command.playerId)
+            }
+            is PlayerMoveCommand -> {
+                val hero = blueHero ?: return
+                hero.targetPosition = command.targetPosition
+            }
+            is PlayerStopCommand -> {
+                val hero = blueHero ?: return
+                hero.targetPosition = null
+            }
+            is PlayerLeaveCommand -> {
+                val hero = blueHero ?: return
+                unregisterEntity(hero)
+            }
+        }
     }
     
-    private fun createMobEnemy(position: Vec, velocity: Vec): MobEnemy {
-        return MobEnemy(
-            id = nextId(),
-            width = config.mobEnemyWidth,
-            height = config.mobEnemyHeight,
-            position = position,
-            velocity = velocity,
-            maxHp = config.mobEnemyHp,
-            shootPattern = null,
-        )
-    }
-    
-    private fun createEliteEnemy(position: Vec, velocity: Vec): EliteEnemy {
-        return EliteEnemy(
-            id = nextId(),
-            width = config.eliteEnemyWidth,
-            height = config.eliteEnemyHeight,
-            position = position,
-            velocity = velocity,
-            maxHp = config.eliteEnemyHp,
-            shootPattern = StraightPattern(
-                velocity = config.enemyBulletSpeed,
-                directionDeg = -90f,
-            ),
-        )
-    }
-    
-    private fun createSuperEnemy(position: Vec, downwardSpeed: Float): SuperEnemy {
-        val horizontalDirection = if (Random.nextBoolean()) 1f else -1f
-        return SuperEnemy(
-            id = nextId(),
-            width = config.superEnemyWidth,
-            height = config.superEnemyHeight,
-            position = position,
-            velocity = Vec(
-                config.superEnemyLateralSpeed * horizontalDirection,
-                -downwardSpeed,
-            ),
-            maxHp = config.superEnemyHp,
-            shootPattern = FanPattern(
-                count = 4,
-                velocity = config.enemyBulletSpeed,
-                directionDeg = -90f,
-                fieldDeg = 45f,
-            ),
-        )
-    }
-    
-    private fun createBossEnemy(): BossEnemy {
-        return BossEnemy(
-            id = nextId(),
-            width = config.bossEnemyWidth,
-            height = config.bossEnemyHeight,
-            position = Vec(config.worldWidth * 0.5f, config.enemySpawnY),
-            velocity = Vec(0f, -config.bossEntrySpeed),
-            maxHp = config.bossEnemyHp,
-            shootPattern = RadialPattern(
-                count = 8,
-                velocity = config.enemyBulletSpeed,
-                directionDeg = -90f,
+    private fun createRedHero(playerId: String): RedHero {
+        return registerEntity(
+            RedHero(
+                id = nextId(),
+                playerId = playerId,
+                width = config.heroWidth,
+                height = config.heroHeight,
+                position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
+                maxHp = config.heroHp,
             )
         )
     }
     
-    private fun createHeroBullet(position: Vec, velocity: Vec, power: Int): HeroBullet {
-        return HeroBullet(
-            id = nextId(),
-            width = config.heroBulletWidth,
-            height = config.heroBulletHeight,
-            position = position,
-            velocity = velocity,
-            power = power,
+    private fun createBlueHero(playerId: String): BlueHero {
+        return registerEntity(
+            BlueHero(
+                id = nextId(),
+                playerId = playerId,
+                width = config.heroWidth,
+                height = config.heroHeight,
+                position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
+                maxHp = config.heroHp,
+            )
+        )
+    }
+    
+    private fun createMobEnemy(position: Vec, velocity: Vec): MobEnemy {
+        return registerEntity(
+            MobEnemy(
+                id = nextId(),
+                width = config.mobEnemyWidth,
+                height = config.mobEnemyHeight,
+                position = position,
+                velocity = velocity,
+                maxHp = config.mobEnemyHp,
+                shootPattern = null,
+            )
+        )
+    }
+    
+    private fun createEliteEnemy(position: Vec, velocity: Vec): EliteEnemy {
+        return registerEntity(
+            EliteEnemy(
+                id = nextId(),
+                width = config.eliteEnemyWidth,
+                height = config.eliteEnemyHeight,
+                position = position,
+                velocity = velocity,
+                maxHp = config.eliteEnemyHp,
+                shootPattern = StraightPattern(
+                    velocity = config.enemyBulletSpeed,
+                    directionDeg = -90f,
+                ),
+            )
+        )
+    }
+    
+    private fun createSuperEnemy(position: Vec, downwardSpeed: Float): SuperEnemy {
+        return registerEntity(
+            SuperEnemy(
+                id = nextId(),
+                width = config.superEnemyWidth,
+                height = config.superEnemyHeight,
+                position = position,
+                velocity = Vec(
+                    config.superEnemyLateralSpeed * if (Random.nextBoolean()) 1f else -1f,
+                    -downwardSpeed,
+                ),
+                maxHp = config.superEnemyHp,
+                shootPattern = FanPattern(
+                    count = 4,
+                    velocity = config.enemyBulletSpeed,
+                    directionDeg = -90f,
+                    fieldDeg = 45f,
+                ),
+            )
+        )
+    }
+    
+    private fun createBossEnemy(): BossEnemy {
+        return registerEntity(
+            BossEnemy(
+                id = nextId(),
+                width = config.bossEnemyWidth,
+                height = config.bossEnemyHeight,
+                position = Vec(config.worldWidth * 0.5f, config.enemySpawnY),
+                velocity = Vec(0f, -config.bossEntrySpeed),
+                maxHp = config.bossEnemyHp,
+                shootPattern = RadialPattern(
+                    count = 8,
+                    velocity = config.enemyBulletSpeed,
+                    directionDeg = -90f,
+                )
+            )
+        )
+    }
+    
+    private fun createRedHeroBullet(position: Vec, velocity: Vec, power: Int): RedHeroBullet {
+        return registerEntity(
+            RedHeroBullet(
+                id = nextId(),
+                width = config.heroBulletWidth,
+                height = config.heroBulletHeight,
+                position = position,
+                velocity = velocity,
+                power = power,
+            )
+        )
+    }
+    
+    private fun createBlueHeroBullet(position: Vec, velocity: Vec, power: Int): BlueHeroBullet {
+        return registerEntity(
+            BlueHeroBullet(
+                id = nextId(),
+                width = config.heroBulletWidth,
+                height = config.heroBulletHeight,
+                position = position,
+                velocity = velocity,
+                power = power,
+            )
         )
     }
     
     private fun createEnemyBullet(position: Vec, velocity: Vec): EnemyBullet {
-        return EnemyBullet(
-            id = nextId(),
-            width = config.enemyBulletWidth,
-            height = config.enemyBulletHeight,
-            position = position,
-            velocity = velocity,
-            power = config.enemyPower,
+        return registerEntity(
+            EnemyBullet(
+                id = nextId(),
+                width = config.enemyBulletWidth,
+                height = config.enemyBulletHeight,
+                position = position,
+                velocity = velocity,
+                power = config.enemyPower,
+            )
         )
     }
     
     private fun createHealthProp(position: Vec): HealthProp {
-        return HealthProp(
-            id = nextId(),
-            width = config.propWidth,
-            height = config.propHeight,
-            position = position,
-            velocity = Vec(0f, -config.propFallSpeed),
+        return registerEntity(
+            HealthProp(
+                id = nextId(),
+                width = config.propWidth,
+                height = config.propHeight,
+                position = position,
+                velocity = Vec(0f, -config.propFallSpeed),
+            )
         )
     }
     
     private fun createEnhanceProp(position: Vec): EnhanceProp {
-        return EnhanceProp(
-            id = nextId(),
-            width = config.propWidth,
-            height = config.propHeight,
-            position = position,
-            velocity = Vec(0f, -config.propFallSpeed),
+        return registerEntity(
+            EnhanceProp(
+                id = nextId(),
+                width = config.propWidth,
+                height = config.propHeight,
+                position = position,
+                velocity = Vec(0f, -config.propFallSpeed),
+            )
         )
     }
     
     private fun createRampageProp(position: Vec): RampageProp {
-        return RampageProp(
-            id = nextId(),
-            width = config.propWidth,
-            height = config.propHeight,
-            position = position,
-            velocity = Vec(0f, -config.propFallSpeed),
+        return registerEntity(
+            RampageProp(
+                id = nextId(),
+                width = config.propWidth,
+                height = config.propHeight,
+                position = position,
+                velocity = Vec(0f, -config.propFallSpeed),
+            )
         )
     }
     
     private fun createBombProp(position: Vec): BombProp {
-        return BombProp(
-            id = nextId(),
-            width = config.propWidth,
-            height = config.propHeight,
-            position = position,
-            velocity = Vec(0f, -config.propFallSpeed),
+        return registerEntity(
+            BombProp(
+                id = nextId(),
+                width = config.propWidth,
+                height = config.propHeight,
+                position = position,
+                velocity = Vec(0f, -config.propFallSpeed),
+            )
         )
+    }
+    
+    private fun moveHero(hero: Hero?, dt: Float) {
+        if (hero == null) return
+        val target = hero.targetPosition ?: return
+        hero.position = hero.position.moveTowards(
+            target = target,
+            maxDistance = config.heroMaxSpeed * dt
+        )
+    }
+    
+    private fun moveEntity(dt: Float) {
+        entities.values
+            .filter { it !is Hero }
+            .forEach {
+                when (it) {
+                    is SuperEnemy -> moveSuperEnemy(it, dt)
+                    is BossEnemy -> moveBossEnemy(it, dt)
+                    else -> it.move(dt)
+                }
+            }
     }
     
     private fun moveSuperEnemy(enemy: SuperEnemy, dt: Float) {
@@ -329,7 +423,6 @@ class GameEngine(
                 val nextVelocityX = abs(enemy.velocity.x).coerceAtLeast(0.01f)
                 setEnemyPositionAndVelocity(enemy, reflectedX, enemy.position.y, nextVelocityX, enemy.velocity.y)
             }
-            
             x > maxX -> {
                 val reflectedX = maxX - (x - maxX)
                 val nextVelocityX = -abs(enemy.velocity.x).coerceAtLeast(0.01f)
@@ -344,88 +437,48 @@ class GameEngine(
                 enemy.position = Vec(x, y)
                 enemy.velocity = Vec(vx, vy)
             }
-            
             is BossEnemy -> {
                 enemy.position = Vec(x, y)
                 enemy.velocity = Vec(vx, vy)
             }
-            
-            else         -> Unit
+            else -> Unit
         }
     }
     
-    private fun entityMove(dt: Float) {
-        val hero = hero
-        if (hero != null) {
-            val runtime = players[hero.ownerPlayerId]
-            val target = runtime?.intent?.moveTarget ?: hero.position
-            val clampedTarget = Vec(
-                target.x.coerceIn(hero.width * 0.5f, config.worldWidth - hero.width * 0.5f),
-                target.y.coerceIn(hero.height * 0.5f, config.worldHeight - hero.height * 0.5f)
-            )
-            hero.position = hero.position.moveTowards(
-                target = clampedTarget,
-                maxDistance = config.heroMaxSpeed * dt
-            )
-        }
-        
-        entities.values
-            .filterNot { it is Hero }
-            .forEach { entity ->
-                when (entity) {
-                    is SuperEnemy -> moveSuperEnemy(entity, dt)
-                    is BossEnemy  -> moveBossEnemy(entity, dt)
-                    else          -> entity.move(dt)
-                }
-            }
+    private fun updateHeroTimers(hero: Hero?, dt: Float) {
+        if (hero == null) return
+        hero.shootTimer = (hero.shootTimer - dt).coerceAtLeast(0f)
+        hero.enhanceTimer = (hero.enhanceTimer - dt).coerceAtLeast(0f)
+        hero.rampageTimer = (hero.rampageTimer - dt).coerceAtLeast(0f)
     }
     
-    private fun aircraftShoot(dt: Float) {
-        val hero = hero
-        if (hero != null) {
-            val runtime = players[hero.ownerPlayerId]
-            if (runtime?.intent?.primaryFirePressed != false) {
-                val interval = currentHeroFireInterval().coerceAtLeast(0.01f)
-                hero.shootTimer += dt
-                while (hero.shootTimer >= interval) {
-                    hero.shootTimer -= interval
-                    currentHeroShootPattern(hero)
-                        .createBullets(hero.position) { position, velocity ->
-                            createHeroBullet(position, velocity, currentHeroBulletPower())
-                        }
-                        .forEach { registerEntity(it) }
+    private fun heroShoot(hero: Hero?) {
+        if (hero == null) return
+        if (hero.shootTimer > 0f) return
+        hero.shootTimer = currentHeroFireInterval(hero)
+        currentHeroShootPattern(hero)
+            .createBullets(hero.position) { position, velocity ->
+                when (hero) {
+                    is RedHero -> createRedHeroBullet(position, velocity, currentHeroBulletPower(hero))
+                    is BlueHero -> createBlueHeroBullet(position, velocity, currentHeroBulletPower(hero))
                 }
             }
-        }
-        
-        entities.values
-            .filterIsInstance<Enemy>()
-            .forEach { enemy ->
-                enemy.shootTimer += dt
-                while (enemy.shootTimer >= config.enemyFireInterval) {
-                    enemy.shootTimer -= config.enemyFireInterval
-                    enemy.shootPattern
-                        ?.createBullets(enemy.position, ::createEnemyBullet)
-                        ?.forEach { registerEntity(it) }
-                }
-            }
+        emitEvent(GameEvent.HERO_SHOOT)
     }
     
     private fun currentHeroShootPattern(hero: Hero): ShootPattern {
         return when {
-            heroRampageTimer > 0f -> RadialPattern(
+            hero.rampageTimer > 0f -> RadialPattern(
                 count = config.rampageBulletCount,
                 velocity = config.heroBulletSpeed,
-                directionDeg = 90f,
+                directionDeg = 90f + sin(hero.rampageTimer / config.rampageDuration * 2f * PI.toFloat()) * 90f,
             )
-            
-            heroEnhanceTimer > 0f -> FanPattern(
+            hero.enhanceTimer > 0f -> FanPattern(
                 count = config.enhanceBulletCount,
                 velocity = config.heroBulletSpeed,
                 directionDeg = 90f,
-                fieldDeg = config.enhanceFieldDeg,
+                fieldDeg = config.enhanceFieldDeg * (1f - cos(hero.enhanceTimer / config.enhanceDuration * 3f * PI.toFloat())),
             )
-            
             else -> hero.shootPattern ?: StraightPattern(
                 velocity = config.heroBulletSpeed,
                 directionDeg = 90f,
@@ -433,47 +486,50 @@ class GameEngine(
         }
     }
     
-    private fun currentHeroBulletPower(): Int {
-        val multiplier = when {
-            heroRampageTimer > 0f -> config.rampageDamageMultiplier
-            heroEnhanceTimer > 0f -> config.enhanceDamageMultiplier
+    private fun currentHeroBulletPower(hero: Hero): Int {
+        return config.heroPower * when {
+            hero.rampageTimer > 0f -> config.rampageDamageMultiplier
+            hero.enhanceTimer > 0f -> config.enhanceDamageMultiplier
             else -> 1
         }
-        return (config.heroPower * multiplier).coerceAtLeast(1)
     }
     
-    private fun currentHeroFireInterval(): Float {
-        return if (heroRampageTimer > 0f) {
-            config.heroFireInterval * config.rampageFireIntervalMultiplier
-        } else {
-            config.heroFireInterval
+    private fun currentHeroFireInterval(hero: Hero): Float {
+        return config.heroFireInterval * when {
+            hero.rampageTimer > 0f -> config.rampageFireIntervalMultiplier
+            hero.enhanceTimer > 0f -> config.enhanceFireIntervalMultiplier
+            else -> 1f
         }
     }
     
-    private fun updateHeroBuffs(dt: Float) {
-        heroEnhanceTimer = (heroEnhanceTimer - dt).coerceAtLeast(0f)
-        heroRampageTimer = (heroRampageTimer - dt).coerceAtLeast(0f)
+    private fun enemyShoot(dt: Float) {
+        entities.values
+            .filterIsInstance<Enemy>()
+            .forEach {
+                it.shootTimer -= dt
+                if (it.shootTimer > 0f) return@forEach
+                it.shootTimer = config.enemyFireInterval
+                it.shootPattern?.createBullets(it.position, ::createEnemyBullet)
+            }
     }
     
-    private fun enemySpawn(dt: Float) {
-        enemySpawnTimer += dt
-        if (enemySpawnTimer < config.enemySpawnInterval) return
-        enemySpawnTimer = 0f
+    private fun spawnEnemy(dt: Float) {
+        enemySpawnTimer -= dt
+        if (enemySpawnTimer > 0f) return
+        enemySpawnTimer = config.enemySpawnInterval
         
-        val x = 0.5f * config.worldWidth + (Random.nextFloat() * 2f - 1f) * 0.5f * config.enemySpawnWidth
+        val x = 0.5f * config.worldWidth + randomIn(-1f, 1f) * 0.5f * config.enemySpawnWidth
         val y = config.enemySpawnY
         val vy = randomIn(config.enemyMinSpeed, config.enemyMaxSpeed)
         val roll = Random.nextFloat()
-        val hasBoss = entities.values.any { it is BossEnemy && it.id !in pendingDestroyReasons }
-        registerEntity(
-            when {
-                roll < 0.60f -> createMobEnemy(Vec(x, y), Vec(0f, -vy))
-                roll < 0.82f -> createEliteEnemy(Vec(x, y), Vec(0f, -vy))
-                roll < 0.95f -> createSuperEnemy(Vec(x, y), vy)
-                !hasBoss     -> createBossEnemy()
-                else         -> createSuperEnemy(Vec(x, y), vy)
-            }
-        )
+        val hasBoss = entities.values.any { it is BossEnemy }
+        when {
+            roll < 0.60f -> createMobEnemy(Vec(x, y), Vec(0f, -vy))
+            roll < 0.82f -> createEliteEnemy(Vec(x, y), Vec(0f, -vy))
+            roll < 0.95f -> createSuperEnemy(Vec(x, y), vy)
+            !hasBoss -> createBossEnemy()
+            else -> createSuperEnemy(Vec(x, y), vy)
+        }
     }
     
     private fun resolveCollisions() {
@@ -490,188 +546,104 @@ class GameEngine(
             }
         }
         
-        val hero = hero
-        if (hero != null) {
-            enemyBullets.forEach { bullet ->
-                if (bullet.collides(hero)) {
-                    resolveEnemyBulletHitHero(bullet, hero)
-                }
+        for (hero in listOfNotNull(redHero, blueHero)) {
+            enemyBullets.forEach {
+                if (it.collides(hero)) resolveEnemyBulletHitHero(hero, it)
             }
-            
-            props.forEach { prop ->
-                if (prop.collides(hero)) {
-                    resolvePropPickup(prop, hero)
-                }
+            props.forEach {
+                if (it.collides(hero)) resolvePropPickup(hero, it)
             }
-            
-            enemies.forEach { enemy ->
-                if (enemy.collides(hero)) {
-                    resolveAircraftCrash(hero, enemy)
-                }
+            enemies.forEach {
+                if (it.collides(hero)) resolveAircraftCrash(hero, it)
             }
         }
     }
     
-    private fun resolveHeroBulletHitEnemy(bullet: Bullet, enemy: Enemy) {
-        if (bullet.id in pendingDestroyReasons) return
-        if (enemy.id in pendingDestroyReasons) return
-        
-        scheduleDamage(enemy, bullet.power, DamageSourceType.HERO_BULLET)
-        scheduleDestroy(bullet, DestroyReason.COLLISION)
-    }
-    
-    private fun resolveEnemyBulletHitHero(bullet: Bullet, hero: Hero) {
-        if (bullet.id in pendingDestroyReasons) return
-        if (hero.id in pendingDestroyReasons) return
-        
-        scheduleDamage(hero, bullet.power, DamageSourceType.ENEMY_BULLET)
-        scheduleDestroy(bullet, DestroyReason.COLLISION)
-    }
-    
-    private fun resolvePropPickup(prop: Prop, hero: Hero) {
-        if (prop.id in pendingDestroyReasons) return
-        if (hero.id in pendingDestroyReasons) return
-        
-        emitEvent(
-            PropCollected(
-                timeSec = elapsedTimeSec,
-                playerId = hero.ownerPlayerId,
-                heroEntityId = hero.id,
-                propEntityId = prop.id,
-                propType = prop.type,
-            )
+    private fun resolveHeroBulletHitEnemy(bullet: HeroBullet, enemy: Enemy) {
+        unregisterEntity(bullet)
+        enemyTakeDamage(
+            enemy, bullet.power, when (bullet) {
+                is RedHeroBullet -> redHero
+                is BlueHeroBullet -> blueHero
+            }
         )
-        
+        emitEvent(GameEvent.BULLET_HIT)
+    }
+    
+    private fun resolveEnemyBulletHitHero(hero: Hero, bullet: EnemyBullet) {
+        unregisterEntity(bullet)
+        heroTakeDamage(hero, bullet.power)
+        emitEvent(GameEvent.BULLET_HIT)
+    }
+    
+    private fun resolvePropPickup(hero: Hero, prop: Prop) {
+        unregisterEntity(prop)
         when (prop) {
             is HealthProp -> {
-                val heal = (hero.maxHp * config.healthPropHealRatio).roundToInt().coerceAtLeast(1)
-                hero.increaseHp(heal)
+                heroIncreaseHp(hero, (hero.maxHp * config.healthPropHealRatio).roundToInt().coerceAtLeast(1))
             }
-            
             is EnhanceProp -> {
-                heroEnhanceTimer = config.enhanceDuration
+                hero.enhanceTimer = config.enhanceDuration
             }
-            
             is RampageProp -> {
-                heroRampageTimer = config.rampageDuration
+                hero.rampageTimer = config.rampageDuration
             }
-            
-            is BombProp   -> {
+            is BombProp -> {
                 val bombDamage = (config.bossEnemyHp * config.bombDamageRatio).roundToInt().coerceAtLeast(1)
                 entities.values
                     .filterIsInstance<Enemy>()
-                    .forEach { scheduleDamage(it, bombDamage, DamageSourceType.BOMB) }
+                    .forEach { enemyTakeDamage(it, bombDamage, hero) }
                 entities.values
                     .filterIsInstance<EnemyBullet>()
-                    .forEach { scheduleDestroy(it, DestroyReason.SYSTEM) }
+                    .forEach { unregisterEntity(it) }
+                emitEvent(GameEvent.BOMB_TRIGGER)
             }
         }
-        scheduleDestroy(prop, DestroyReason.PICKED_UP)
+        emitEvent(GameEvent.PICKUP_PROP)
     }
     
     private fun resolveAircraftCrash(hero: Hero, enemy: Enemy) {
-        if (hero.id in pendingDestroyReasons) return
-        if (enemy.id in pendingDestroyReasons) return
-        
-        scheduleDamage(hero, enemy.hp, DamageSourceType.COLLISION)
-        scheduleDamage(enemy, enemy.hp, DamageSourceType.COLLISION)
+        heroTakeDamage(hero, enemy.hp)
+        enemyTakeDamage(enemy, enemy.hp, hero)
     }
     
-    private fun applyCombatResults() {
-        val deadEnemies = mutableListOf<Enemy>()
-        pendingDamage.forEach { (id, damageInfo) ->
-            val aircraft = entities[id] as? Aircraft ?: return@forEach
-            aircraft.takeDamage(damageInfo.totalDamage)
-            emitEvent(
-                DamageApplied(
-                    timeSec = elapsedTimeSec,
-                    targetEntityId = aircraft.id,
-                    targetEntityType = aircraft.type,
-                    damage = damageInfo.totalDamage,
-                    sourceType = damageInfo.sourceType,
-                    remainingHp = aircraft.hp,
-                )
-            )
-            if (aircraft.isDead) {
-                if (aircraft is Enemy) {
-                    deadEnemies += aircraft
-                }
-                scheduleDestroy(aircraft, DestroyReason.KILLED)
-            }
-        }
-        pendingDamage.clear()
-        
-        deadEnemies.forEach { enemy ->
-            val delta = scoreForEnemy(enemy)
-            score += delta
-            emitEvent(
-                ScoreChanged(
-                    timeSec = elapsedTimeSec,
-                    newScore = score,
-                    delta = delta,
-                    sourceEntityId = enemy.id,
-                    sourceEntityType = enemy.type,
-                )
-            )
+    private fun heroIncreaseHp(hero: Hero, amount: Int) {
+        if (hero.hp <= 0) return
+        hero.hp = (hero.hp + amount).coerceAtMost(hero.maxHp)
+    }
+    
+    private fun heroTakeDamage(hero: Hero, amount: Int) {
+        if (hero.hp <= 0) return
+        hero.hp = (hero.hp - amount).coerceAtLeast(0)
+        if (hero.hp <= 0) unregisterEntity(hero)
+    }
+    
+    private fun enemyTakeDamage(enemy: Enemy, amount: Int, damageSource: Hero?) {
+        if (enemy.hp <= 0) return
+        enemy.hp = (enemy.hp - amount).coerceAtLeast(0)
+        if (enemy.hp <= 0) {
+            damageSource?.score += scoreForEnemy(enemy)
             dropPropsForEnemy(enemy)
-        }
-        
-        val destroyed = pendingDestroyReasons.toMap()
-        pendingDestroyReasons.keys.forEach { entities.remove(it) }
-        pendingDestroyReasons.clear()
-        
-        destroyed.forEach { (entityId, reason) ->
-            val entityType = heroEntityTypeFallback(entityId) ?: return@forEach
-            emitEvent(
-                EntityDestroyed(
-                    timeSec = elapsedTimeSec,
-                    entityId = entityId,
-                    entityType = entityType,
-                    reason = reason,
-                )
-            )
-        }
-        
-        val hero = hero
-        if (hero != null && !entities.containsKey(hero.id)) {
-            this.hero = null
-            players[hero.ownerPlayerId]?.heroId = null
-            heroEnhanceTimer = 0f
-            heroRampageTimer = 0f
-            emitEvent(PlayerEliminated(elapsedTimeSec, hero.ownerPlayerId, hero.id))
-            if (!gameOver) {
-                gameOver = true
-                emitEvent(GameEnded(elapsedTimeSec))
-            }
-        }
-    }
-    
-    private fun heroEntityTypeFallback(entityId: Int): EntityType? {
-        return when {
-            entityId == hero?.id -> EntityType.HERO
-            else                 -> recentlyDestroyedEntityTypes.remove(entityId)
+            unregisterEntity(enemy)
         }
     }
     
     private fun dropPropsForEnemy(enemy: Enemy) {
         when (enemy) {
             is EliteEnemy -> {
-                registerEntity(createPropByKind(randomElitePropKind(), propSpawnPosition(enemy)))
+                registerEntity(createPropByKind(randomElitePropType(), propSpawnPosition(enemy)))
             }
-            
             is SuperEnemy -> {
                 repeat(Random.nextInt(1, 3)) {
-                    registerEntity(createPropByKind(randomAnyPropKind(), propSpawnPosition(enemy)))
+                    registerEntity(createPropByKind(randomAnyPropType(), propSpawnPosition(enemy)))
                 }
             }
-            
             is BossEnemy -> {
                 repeat(3) {
-                    registerEntity(createPropByKind(randomAnyPropKind(), propSpawnPosition(enemy)))
+                    registerEntity(createPropByKind(randomAnyPropType(), propSpawnPosition(enemy)))
                 }
             }
-            
-            else         -> Unit
+            else -> Unit
         }
     }
     
@@ -683,27 +655,27 @@ class GameEngine(
         return Vec(x, y)
     }
     
-    private fun randomElitePropKind(): PropKind {
-        return weightedPropKind(
+    private fun randomElitePropType(): PropType {
+        return weightedPropType(
             listOf(
-                PropKind.HEALTH to config.propWeightHealth,
-                PropKind.ENHANCE to config.propWeightEnhance,
+                PropType.HEALTH to config.propWeightHealth,
+                PropType.ENHANCE to config.propWeightEnhance,
             )
         )
     }
     
-    private fun randomAnyPropKind(): PropKind {
-        return weightedPropKind(
+    private fun randomAnyPropType(): PropType {
+        return weightedPropType(
             listOf(
-                PropKind.HEALTH to config.propWeightHealth,
-                PropKind.ENHANCE to config.propWeightEnhance,
-                PropKind.RAMPAGE to config.propWeightRampage,
-                PropKind.BOMB to config.propWeightBomb,
+                PropType.HEALTH to config.propWeightHealth,
+                PropType.ENHANCE to config.propWeightEnhance,
+                PropType.RAMPAGE to config.propWeightRampage,
+                PropType.BOMB to config.propWeightBomb,
             )
         )
     }
     
-    private fun weightedPropKind(weightedKinds: List<Pair<PropKind, Int>>): PropKind {
+    private fun weightedPropType(weightedKinds: List<Pair<PropType, Int>>): PropType {
         val normalized = weightedKinds.filter { it.second > 0 }
         val totalWeight = normalized.sumOf { it.second }
         require(totalWeight > 0) { "prop weight must be positive" }
@@ -717,106 +689,55 @@ class GameEngine(
         return normalized.last().first
     }
     
-    private fun createPropByKind(kind: PropKind, position: Vec): Prop {
-        return when (kind) {
-            PropKind.HEALTH -> createHealthProp(position)
-            PropKind.ENHANCE -> createEnhanceProp(position)
-            PropKind.RAMPAGE -> createRampageProp(position)
-            PropKind.BOMB   -> createBombProp(position)
-        }
-    }
-    
     private fun scoreForEnemy(enemy: Enemy): Int {
         return when (enemy) {
-            is MobEnemy  -> config.mobEnemyScore
+            is MobEnemy -> config.mobEnemyScore
             is EliteEnemy -> config.eliteEnemyScore
             is SuperEnemy -> config.superEnemyScore
             is BossEnemy -> config.bossEnemyScore
         }
     }
     
-    private fun handleBoundaryCleanup() {
+    private fun createPropByKind(kind: PropType, position: Vec): Prop {
+        return when (kind) {
+            PropType.HEALTH -> createHealthProp(position)
+            PropType.ENHANCE -> createEnhanceProp(position)
+            PropType.RAMPAGE -> createRampageProp(position)
+            PropType.BOMB -> createBombProp(position)
+        }
+    }
+    
+    private fun boundaryCleanup() {
         entities.values
             .filter { it.isOutOfWorld(config.worldWidth, config.worldHeight) }
-            .forEach { scheduleDestroy(it, DestroyReason.OUT_OF_WORLD) }
+            .forEach { unregisterEntity(it) }
     }
     
-    private fun nextId(): Int = entityIdSeq++
+    private fun nextId(): Int {
+        return entityIdSeq++
+    }
     
-    private fun <T : Entity> registerEntity(obj: T) {
+    private fun <T : Entity> registerEntity(obj: T): T {
+        when (obj) {
+            is RedHero -> redHero = obj
+            is BlueHero -> blueHero = obj
+            else -> {}
+        }
         entities[obj.id] = obj
-        recentlyDestroyedEntityTypes[obj.id] = obj.type
-        if (obj is Hero) {
-            players.getOrPut(obj.ownerPlayerId) { PlayerRuntimeState() }.heroId = obj.id
-        }
-        emitEvent(
-            EntitySpawned(
-                timeSec = elapsedTimeSec,
-                entityId = obj.id,
-                entityType = obj.type,
-                position = obj.position,
-                ownerPlayerId = (obj as? Hero)?.ownerPlayerId,
-            )
-        )
+        return obj
     }
     
-    private fun scheduleDamage(target: Aircraft, damage: Int, sourceType: DamageSourceType) {
-        val bucket = pendingDamage.getOrPut(target.id) { PendingDamage() }
-        bucket.totalDamage += damage
-        bucket.sourceType = sourceType
-    }
-    
-    private fun scheduleDestroy(obj: Entity, reason: DestroyReason) {
-        val current = pendingDestroyReasons[obj.id]
-        if (current == null || destroyPriorityOf(reason) >= destroyPriorityOf(current)) {
-            pendingDestroyReasons[obj.id] = reason
+    private fun <T : Entity> unregisterEntity(obj: T) {
+        when (obj) {
+            is RedHero -> redHero = null
+            is BlueHero -> blueHero = null
+            else -> {}
         }
-        recentlyDestroyedEntityTypes[obj.id] = obj.type
-    }
-    
-    private fun emitBuffStateChanges() {
-        val enhanceActive = heroEnhanceTimer > 0f && hero != null
-        val rampageActive = heroRampageTimer > 0f && hero != null
-        
-        if (enhanceActive != lastEnhanceActive) {
-            emitEvent(
-                BuffStateChanged(
-                    timeSec = elapsedTimeSec,
-                    playerId = PlayerId.LOCAL,
-                    buffType = BuffType.ENHANCE,
-                    active = enhanceActive,
-                    remainingSec = heroEnhanceTimer,
-                )
-            )
-            lastEnhanceActive = enhanceActive
-        }
-        
-        if (rampageActive != lastRampageActive) {
-            emitEvent(
-                BuffStateChanged(
-                    timeSec = elapsedTimeSec,
-                    playerId = PlayerId.LOCAL,
-                    buffType = BuffType.RAMPAGE,
-                    active = rampageActive,
-                    remainingSec = heroRampageTimer,
-                )
-            )
-            lastRampageActive = rampageActive
-        }
+        entities.remove(obj.id)
     }
     
     private fun emitEvent(event: GameEvent) {
-        pendingEvents += event
-    }
-    
-    private fun destroyPriorityOf(reason: DestroyReason): Int {
-        return when (reason) {
-            DestroyReason.KILLED       -> 4
-            DestroyReason.PICKED_UP    -> 3
-            DestroyReason.COLLISION    -> 2
-            DestroyReason.OUT_OF_WORLD -> 1
-            DestroyReason.SYSTEM       -> 0
-        }
+        events += event
     }
     
     private fun randomIn(min: Float, max: Float): Float {

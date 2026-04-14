@@ -2,11 +2,14 @@ package com.example.aircraftwar.ui
 
 import android.content.Context
 import android.graphics.*
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.graphics.withClip
 import com.example.aircraftwar.engine.GameDifficulty
+import com.example.aircraftwar.engine.GameEngine
+import com.example.aircraftwar.engine.PlayerJoinRedCommand
 import com.example.aircraftwar.entity.EntityType
 import kotlin.math.max
 import kotlin.random.Random
@@ -15,10 +18,10 @@ class GameView(
     context: Context,
     difficulty: GameDifficulty = GameDifficulty.NORMAL,
     private val onDeathContinue: () -> Unit = {},
-) : SurfaceView(context), SurfaceHolder.Callback, Runnable {
+) : SurfaceView(context), SurfaceHolder.Callback {
     
-    private val session = GameSession(difficulty)
-    private val inputController = TouchPlayerInputController()
+    private val session = GameEngine(difficulty.config)
+    private val inputController = TouchPlayerInputController("local")
     private val sprites = SpriteRepository(context)
     private val audio = GameAudio(context)
     private val viewport = WorldViewport(difficulty.config.worldWidth, difficulty.config.worldHeight)
@@ -28,18 +31,12 @@ class GameView(
         GameDifficulty.HARD -> if (Random.nextBoolean()) sprites.bg4 else sprites.bg5
     }
     
-    @Volatile
     private var running = false
     
-    @Volatile
-    private var latestSnapshot = FrameSnapshot(
-        drawables = emptyList(),
-        score = 0,
-        elapsedTimeSec = 0f,
-        hasBoss = false,
-        gameOver = false,
-    )
-    private var renderThread: Thread? = null
+    private var latestSnapshot: FrameSnapshot? = null
+    private val choreographer = Choreographer.getInstance()
+    private var frameCallback: Choreographer.FrameCallback? = null
+    private var lastFrameTimeNs: Long = 0
     
     private var backgroundOffsetPx = 0f
     private val backgroundScrollSpeedPxPerSec = 120f
@@ -51,22 +48,34 @@ class GameView(
         isClickable = true
     }
     
-    override fun run() {
-        var lastNs = System.nanoTime()
-        while (running) {
-            val now = System.nanoTime()
-            val dt = ((now - lastNs) / 1_000_000_000f).coerceAtMost(0.033f)
-            lastNs = now
-            
-            val frame = session.tick(dt)
-            latestSnapshot = frame.renderFrame
-            audio.sync(frame.renderFrame, frame.audioEvents)
-            
-            if (!frame.renderFrame.gameOver) {
-                updateBackground(dt)
+    private fun startGameLoop() {
+        lastFrameTimeNs = System.nanoTime()
+        frameCallback = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!running) return
+                
+                val dt = ((frameTimeNanos - lastFrameTimeNs) / 1_000_000_000f).coerceAtMost(0.033f)
+                lastFrameTimeNs = frameTimeNanos
+                
+                session.update(dt)
+                val snapshot = session.snapshot()
+                latestSnapshot = snapshot
+                audio.sync(snapshot, snapshot.events)
+                
+                if (!snapshot.gameOver) {
+                    updateBackground(dt)
+                }
+                drawFrame(snapshot)
+                
+                if (snapshot.gameOver) {
+                    running = false
+                    return
+                }
+                
+                choreographer.postFrameCallback(this)
             }
-            drawFrame(frame.renderFrame)
         }
+        choreographer.postFrameCallback(frameCallback!!)
     }
     
     private fun updateBackground(dt: Float) {
@@ -90,7 +99,7 @@ class GameView(
             
             canvas.withClip(contentRect) {
                 snapshot.drawables.forEach { state ->
-                    val bitmap = state.type.bitmap
+                    val bitmap = state.type.getBitmap()
                     val targetRect = viewport.worldRectToScreen(
                         centerX = state.x,
                         centerY = state.y,
@@ -142,20 +151,33 @@ class GameView(
         }
     }
     
-    private val EntityType.bitmap
-        get() = when (this) {
-            EntityType.HERO         -> sprites.hero
-            EntityType.MOB_ENEMY    -> sprites.enemyMob
-            EntityType.ELITE_ENEMY  -> sprites.enemyElite
-            EntityType.SUPER_ENEMY  -> sprites.enemySuper
-            EntityType.BOSS_ENEMY   -> sprites.enemyBoss
-            EntityType.HERO_BULLET  -> sprites.bulletHero
-            EntityType.ENEMY_BULLET -> sprites.bulletEnemy
-            EntityType.HEALTH_PROP  -> sprites.propHealth
-            EntityType.BOMB_PROP    -> sprites.propBomb
-            EntityType.ENHANCE_PROP -> sprites.propEnhance
-            EntityType.RAMPAGE_PROP -> sprites.propRampage
-        }
+    private fun EntityType.isHero() = this == EntityType.RED_HERO || this == EntityType.BLUE_HERO
+    
+    private fun EntityType.getBitmap() = when (this) {
+        EntityType.RED_HERO -> sprites.heroRed
+        EntityType.BLUE_HERO -> sprites.heroBlue
+        EntityType.MOB_ENEMY -> sprites.enemyMob
+        EntityType.ELITE_ENEMY -> sprites.enemyElite
+        EntityType.SUPER_ENEMY -> sprites.enemySuper
+        EntityType.BOSS_ENEMY -> sprites.enemyBoss
+        EntityType.RED_HERO_BULLET -> sprites.bulletHeroRed
+        EntityType.BLUE_HERO_BULLET -> sprites.bulletHeroBlue
+        EntityType.ENEMY_BULLET -> sprites.bulletEnemy
+        EntityType.HEALTH_PROP -> sprites.propHealth
+        EntityType.BOMB_PROP -> sprites.propBomb
+        EntityType.ENHANCE_PROP -> sprites.propEnhance
+        EntityType.RAMPAGE_PROP -> sprites.propRampage
+    }
+    
+    private fun EntityType.getHasHealthBar(): Boolean = when (this) {
+        EntityType.RED_HERO,
+        EntityType.BLUE_HERO,
+        EntityType.MOB_ENEMY,
+        EntityType.ELITE_ENEMY,
+        EntityType.SUPER_ENEMY,
+        EntityType.BOSS_ENEMY -> true
+        else -> false
+    }
     
     private fun drawBitmapAspectCover(
         canvas: Canvas,
@@ -187,7 +209,7 @@ class GameView(
     private fun drawHealthBar(canvas: Canvas, state: Drawable) {
         val hp = state.hp ?: return
         val maxHp = state.maxHp ?: return
-        if (!state.type.hasHealthBar || maxHp <= 0) return
+        if (!state.type.getHasHealthBar() || maxHp <= 0) return
         
         val targetRect = viewport.worldRectToScreen(
             centerX = state.x,
@@ -210,7 +232,7 @@ class GameView(
             backgroundRect.left + backgroundRect.width() * fillRatio,
             backgroundRect.bottom
         )
-        val fillPaint = if (state.type == EntityType.HERO) heroHpBarPaint else enemyHpBarPaint
+        val fillPaint = if (state.type.isHero()) heroHpBarPaint else enemyHpBarPaint
         
         canvas.drawRoundRect(backgroundRect, barHeight * 0.35f, barHeight * 0.35f, hpBarBackgroundPaint)
         if (fillRatio > 0f) {
@@ -222,12 +244,13 @@ class GameView(
     private fun drawHud(canvas: Canvas, contentRect: RectF, snapshot: FrameSnapshot) {
         val padding = max(16f, viewport.scale * 0.22f)
         hudTextPaint.textSize = max(26f, viewport.scale * 0.34f)
-        val lineHeight = hudTextPaint.fontSpacing * 0.92f
+        val lineHeight = hudTextPaint.fontSpacing
         val left = contentRect.left + padding
         val topBaseline = contentRect.top + padding - hudTextPaint.fontMetrics.ascent
         
-        canvas.drawText("Score: ${snapshot.score}", left, topBaseline, hudTextPaint)
-        canvas.drawText("Time: ${formatElapsedTime(snapshot.elapsedTimeSec)}", left, topBaseline + lineHeight, hudTextPaint)
+        canvas.drawText("红方分数: ${snapshot.scoreRed}", left, topBaseline, hudTextPaint)
+        canvas.drawText("蓝方分数: ${snapshot.scoreBlue}", left, topBaseline + lineHeight, hudTextPaint)
+        canvas.drawText(formatElapsedTime(snapshot.elapsedTimeSec), left, topBaseline + lineHeight * 2, hudTextPaint)
     }
     
     private fun drawDeathOverlay(canvas: Canvas, contentRect: RectF) {
@@ -254,20 +277,9 @@ class GameView(
         return String.format("%02d:%02d", minutes, remainSeconds)
     }
     
-    private val EntityType.hasHealthBar: Boolean
-        get() = when (this) {
-            EntityType.HERO,
-            EntityType.MOB_ENEMY,
-            EntityType.ELITE_ENEMY,
-            EntityType.SUPER_ENEMY,
-            EntityType.BOSS_ENEMY -> true
-            
-            else -> false
-        }
-    
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val snapshot = latestSnapshot
-        if (snapshot.gameOver) {
+        if (snapshot != null && snapshot.gameOver) {
             if (event.action == MotionEvent.ACTION_DOWN && !deathPromptHandled) {
                 deathPromptHandled = true
                 post { onDeathContinue() }
@@ -285,9 +297,10 @@ class GameView(
         backgroundOffsetPx = 0f
         deathPromptHandled = false
         audio.onHostResume()
-        latestSnapshot = session.currentFrame().renderFrame
+        session.submitCommand(PlayerJoinRedCommand("local", 0))
+        latestSnapshot = session.snapshot()
         running = true
-        renderThread = Thread(this, "game-loop").also { it.start() }
+        startGameLoop()
     }
     
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -296,7 +309,8 @@ class GameView(
     
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         running = false
-        renderThread?.join(500)
+        frameCallback?.let { choreographer.removeFrameCallback(it) }
+        frameCallback = null
         audio.onHostPause()
     }
     
