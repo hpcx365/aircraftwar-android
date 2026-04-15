@@ -1,5 +1,6 @@
 package com.example.aircraftwar.engine
 
+import org.json.JSONObject
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -33,6 +34,21 @@ data class Vec(
             x + dx * ratio,
             y + dy * ratio
         )
+    }
+    
+    fun toJson(): String = JSONObject().apply {
+        put("x", x)
+        put("y", y)
+    }.toString()
+    
+    companion object {
+        
+        fun fromJson(string: String): Vec = JSONObject(string).let {
+            Vec(
+                it.getDouble("x").toFloat(),
+                it.getDouble("y").toFloat(),
+            )
+        }
     }
 }
 

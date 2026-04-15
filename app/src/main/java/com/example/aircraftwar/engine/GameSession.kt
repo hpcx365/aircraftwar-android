@@ -1,95 +1,118 @@
 package com.example.aircraftwar.engine
 
 import com.example.aircraftwar.entity.*
-import com.example.aircraftwar.ui.Drawable
-import com.example.aircraftwar.ui.FrameSnapshot
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.math.*
 import kotlin.random.Random
 
-class GameEngine(
-    val config: GameConfig = NormalGameConfig
+class GameSession(
+    val difficulty: GameDifficulty,
 ) {
+    
+    private val lock = ReentrantReadWriteLock()
     
     private var entityIdSeq = 0
     private val entities = linkedMapOf<Int, Entity>()
     private var redHero: RedHero? = null
     private var blueHero: BlueHero? = null
     
+    private var started = false
     private var redHeroJoined = false
     private var blueHeroJoined = false
-    private val commandQueue = ArrayDeque<PlayerCommand>()
+    private val commandQueue = ArrayDeque<GameCommand>()
     
     private var enemySpawnTimer = 0f
     private var elapsedTimeSec = 0f
-    private val events = ArrayList<GameEvent>()
+    private val audioEvents = ArrayList<AudioEvent>()
     
-    fun isGameStarted(): Boolean {
-        return redHeroJoined || blueHeroJoined
+    fun isOver(): Boolean {
+        lock.readLock().lock()
+        try {
+            return started && (!redHeroJoined || redHero == null) && (!blueHeroJoined || blueHero == null)
+        } finally {
+            lock.readLock().unlock()
+        }
     }
     
-    fun isGameOver(): Boolean {
-        return isGameStarted() && (!redHeroJoined || redHero == null) && (!blueHeroJoined || blueHero == null)
-    }
-    
-    fun submitCommand(command: PlayerCommand) {
-        commandQueue.add(command)
+    fun submitCommand(command: GameCommand) {
+        lock.writeLock().lock()
+        try {
+            commandQueue.add(command)
+        } finally {
+            lock.writeLock().unlock()
+        }
     }
     
     fun update(dt: Float) {
-        applyCommands()
-        clearEvents()
-        moveHero(redHero, dt)
-        moveHero(blueHero, dt)
-        moveEntity(dt)
-        updateHeroTimers(redHero, dt)
-        updateHeroTimers(blueHero, dt)
-        heroShoot(redHero)
-        heroShoot(blueHero)
-        enemyShoot(dt)
-        spawnEnemy(dt)
-        resolveCollisions()
-        boundaryCleanup()
-        elapsedTimeSec += dt
-        if (isGameOver()) {
-            emitEvent(GameEvent.GAME_OVER)
+        lock.writeLock().lock()
+        try {
+            applyCommands()
+            clearEvents()
+            moveHero(redHero, dt)
+            moveHero(blueHero, dt)
+            if (started) {
+                moveEntity(dt)
+                updateHeroTimers(redHero, dt)
+                updateHeroTimers(blueHero, dt)
+                heroShoot(redHero)
+                heroShoot(blueHero)
+                enemyShoot(dt)
+                spawnEnemy(dt)
+                resolveCollisions()
+                boundaryCleanup()
+                elapsedTimeSec += dt
+            }
+            if (isOver()) {
+                emitEvent(AudioEvent.GAME_OVER)
+            }
+        } finally {
+            lock.writeLock().unlock()
         }
     }
     
     fun snapshot(): FrameSnapshot {
-        return FrameSnapshot(
-            scoreRed = redHero?.score,
-            scoreBlue = blueHero?.score,
-            elapsedTimeSec = elapsedTimeSec,
-            hasBoss = entities.values.any { it is BossEnemy },
-            gameOver = isGameOver(),
-            events = ArrayList(events),
-            drawables = entities.values.map {
-                when (it) {
-                    is Aircraft -> Drawable(
-                        id = it.id,
-                        type = it.type,
-                        x = it.position.x,
-                        y = it.position.y,
-                        width = it.width,
-                        height = it.height,
-                        hp = it.hp,
-                        maxHp = it.maxHp,
-                    )
-                    else -> Drawable(
-                        id = it.id,
-                        type = it.type,
-                        x = it.position.x,
-                        y = it.position.y,
-                        width = it.width,
-                        height = it.height,
-                    )
-                }
-            },
-        )
+        lock.readLock().lock()
+        try {
+            return FrameSnapshot(
+                worldWidth = config.worldWidth,
+                worldHeight = config.worldHeight,
+                difficulty = difficulty,
+                scoreRed = redHero?.score,
+                scoreBlue = blueHero?.score,
+                elapsedTimeSec = elapsedTimeSec,
+                hasBoss = entities.values.any { it is BossEnemy },
+                gameOver = isOver(),
+                events = ArrayList(audioEvents),
+                entities = entities.values.map {
+                    when (it) {
+                        is Aircraft -> EntitySnapshot(
+                            id = it.id,
+                            type = it.type,
+                            x = it.position.x,
+                            y = it.position.y,
+                            width = it.width,
+                            height = it.height,
+                            hp = it.hp,
+                            maxHp = it.maxHp,
+                        )
+                        else -> EntitySnapshot(
+                            id = it.id,
+                            type = it.type,
+                            x = it.position.x,
+                            y = it.position.y,
+                            width = it.width,
+                            height = it.height,
+                        )
+                    }
+                },
+            )
+        } finally {
+            lock.readLock().unlock()
+        }
     }
     
     private fun clearEvents() {
-        events.clear()
+        audioEvents.clear()
     }
     
     private fun applyCommands() {
@@ -98,26 +121,31 @@ class GameEngine(
         
         while (commandQueue.isNotEmpty()) {
             when (val command = commandQueue.removeFirst()) {
-                is PlayerJoinRedCommand -> {
-                    if (!redHeroJoined && redPlayerCommand == null) {
-                        redPlayerCommand = command
-                    }
+                is StartGameCommand -> {
+                    started = true
                 }
-                is PlayerJoinBlueCommand -> {
-                    if (!blueHeroJoined && bluePlayerCommand == null) {
-                        bluePlayerCommand = command
-                    }
-                }
-                else -> {
-                    when (command.playerId) {
-                        redHero?.playerId -> {
-                            if (command.sequence > (redPlayerCommand?.sequence ?: -1)) {
-                                redPlayerCommand = command
-                            }
+                is PlayerCommand -> when (command) {
+                    is PlayerJoinRedCommand -> {
+                        if (!redHeroJoined && redPlayerCommand == null) {
+                            redPlayerCommand = command
                         }
-                        blueHero?.playerId -> {
-                            if (command.sequence > (bluePlayerCommand?.sequence ?: -1)) {
-                                bluePlayerCommand = command
+                    }
+                    is PlayerJoinBlueCommand -> {
+                        if (!blueHeroJoined && bluePlayerCommand == null) {
+                            bluePlayerCommand = command
+                        }
+                    }
+                    else -> {
+                        when (command.playerId) {
+                            redHero?.playerId -> {
+                                if (command.sequence > (redPlayerCommand?.sequence ?: -1)) {
+                                    redPlayerCommand = command
+                                }
+                            }
+                            blueHero?.playerId -> {
+                                if (command.sequence > (bluePlayerCommand?.sequence ?: -1)) {
+                                    bluePlayerCommand = command
+                                }
                             }
                         }
                     }
@@ -463,7 +491,7 @@ class GameEngine(
                     is BlueHero -> createBlueHeroBullet(position, velocity, currentHeroBulletPower(hero))
                 }
             }
-        emitEvent(GameEvent.HERO_SHOOT)
+        emitEvent(AudioEvent.HERO_SHOOT)
     }
     
     private fun currentHeroShootPattern(hero: Hero): ShootPattern {
@@ -567,13 +595,13 @@ class GameEngine(
                 is BlueHeroBullet -> blueHero
             }
         )
-        emitEvent(GameEvent.BULLET_HIT)
+        emitEvent(AudioEvent.BULLET_HIT)
     }
     
     private fun resolveEnemyBulletHitHero(hero: Hero, bullet: EnemyBullet) {
         unregisterEntity(bullet)
         heroTakeDamage(hero, bullet.power)
-        emitEvent(GameEvent.BULLET_HIT)
+        emitEvent(AudioEvent.BULLET_HIT)
     }
     
     private fun resolvePropPickup(hero: Hero, prop: Prop) {
@@ -596,10 +624,10 @@ class GameEngine(
                 entities.values
                     .filterIsInstance<EnemyBullet>()
                     .forEach { unregisterEntity(it) }
-                emitEvent(GameEvent.BOMB_TRIGGER)
+                emitEvent(AudioEvent.BOMB_TRIGGER)
             }
         }
-        emitEvent(GameEvent.PICKUP_PROP)
+        emitEvent(AudioEvent.PICKUP_PROP)
     }
     
     private fun resolveAircraftCrash(hero: Hero, enemy: Enemy) {
@@ -709,9 +737,16 @@ class GameEngine(
     
     private fun boundaryCleanup() {
         entities.values
-            .filter { it.isOutOfWorld(config.worldWidth, config.worldHeight) }
+            .filter { it.isOutOfWorld() }
             .forEach { unregisterEntity(it) }
     }
+    
+    private val config: GameConfig
+        get() = when (difficulty) {
+            GameDifficulty.EASY -> EasyGameConfig
+            GameDifficulty.NORMAL -> NormalGameConfig
+            GameDifficulty.HARD -> HardGameConfig
+        }
     
     private fun nextId(): Int {
         return entityIdSeq++
@@ -736,8 +771,23 @@ class GameEngine(
         entities.remove(obj.id)
     }
     
-    private fun emitEvent(event: GameEvent) {
-        events += event
+    private fun emitEvent(event: AudioEvent) {
+        audioEvents += event
+    }
+    
+    private fun Entity.move(dt: Float) {
+        position += velocity * dt
+    }
+    
+    private fun Entity.collides(that: Entity): Boolean = bounds.intersects(that.bounds)
+    
+    private fun Entity.isOutOfWorld(): Boolean {
+        return when (this) {
+            is Hero -> false
+            is BossEnemy -> false
+            is Enemy -> position.y < 0
+            else -> !bounds.intersects(Rect(0.5f * config.worldWidth, 0.5f * config.worldHeight, config.worldWidth, config.worldHeight))
+        }
     }
     
     private fun randomIn(min: Float, max: Float): Float {

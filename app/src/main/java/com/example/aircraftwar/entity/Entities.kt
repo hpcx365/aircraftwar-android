@@ -1,5 +1,6 @@
 package com.example.aircraftwar.entity
 
+import com.example.aircraftwar.engine.EntityType
 import com.example.aircraftwar.engine.Rect
 import com.example.aircraftwar.engine.Vec
 
@@ -33,22 +34,6 @@ sealed interface Entity {
     val left: Float get() = position.x - width * 0.5f
     val right: Float get() = position.x + width * 0.5f
     val bounds: Rect get() = Rect(position.x, position.y, width, height)
-    
-    fun move(dt: Float) {
-        position += velocity * dt
-    }
-    
-    fun collides(that: Entity): Boolean = bounds.intersects(that.bounds)
-    
-    fun isOutOfWorld(worldWidth: Float, worldHeight: Float): Boolean {
-        return when (this) {
-            is Hero        -> false
-            is Enemy       -> top < 0f
-            is Prop        -> top < 0f
-            is HeroBullet  -> bottom > worldHeight
-            is EnemyBullet -> top < 0f || right < 0f || left > worldWidth
-        }
-    }
 }
 
 sealed interface Aircraft : Entity {

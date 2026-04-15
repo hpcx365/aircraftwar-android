@@ -6,38 +6,22 @@ import kotlin.math.min
 data class WorldViewport(
     val worldWidth: Float,
     val worldHeight: Float,
+    val screenWidth: Int,
+    val screenHeight: Int,
 ) {
     
-    var scale: Float = 1f
-        private set
-    
-    var offsetX: Float = 0f
-        private set
-    
-    var offsetY: Float = 0f
-        private set
-    
-    var screenWidth: Int = 1
-        private set
-    
-    var screenHeight: Int = 1
-        private set
-    
-    fun update(screenWidth: Int, screenHeight: Int) {
-        this.screenWidth = screenWidth.coerceAtLeast(1)
-        this.screenHeight = screenHeight.coerceAtLeast(1)
-        
-        scale = min(
-            this.screenWidth / worldWidth,
-            this.screenHeight / worldHeight
+    val contentWidth: Float get() = worldWidth * scale
+    val contentHeight: Float get() = worldHeight * scale
+    val offsetX: Float get() = 0.5f * (screenWidth - contentWidth)
+    val offsetY: Float get() = 0.5f * (screenHeight - contentHeight)
+    val scale: Float get() = min(screenWidth / worldWidth, screenHeight / worldHeight)
+    val contentRect: RectF
+        get() = RectF(
+            offsetX,
+            offsetY,
+            offsetX + worldWidth * scale,
+            offsetY + worldHeight * scale
         )
-        
-        val contentWidth = worldWidth * scale
-        val contentHeight = worldHeight * scale
-        
-        offsetX = (this.screenWidth - contentWidth) / 2f
-        offsetY = (this.screenHeight - contentHeight) / 2f
-    }
     
     fun worldToScreenX(worldX: Float): Float {
         return offsetX + worldX * scale
@@ -66,22 +50,5 @@ data class WorldViewport(
         val top = worldToScreenY(centerY + height / 2f)
         val bottom = worldToScreenY(centerY - height / 2f)
         return RectF(left, top, right, bottom)
-    }
-    
-    fun containsScreenPoint(screenX: Float, screenY: Float): Boolean {
-        val left = offsetX
-        val right = offsetX + worldWidth * scale
-        val top = offsetY
-        val bottom = offsetY + worldHeight * scale
-        return screenX in left..right && screenY in top..bottom
-    }
-    
-    fun contentRect(): RectF {
-        return RectF(
-            offsetX,
-            offsetY,
-            offsetX + worldWidth * scale,
-            offsetY + worldHeight * scale
-        )
     }
 }

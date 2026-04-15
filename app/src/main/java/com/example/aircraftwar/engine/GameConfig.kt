@@ -70,16 +70,6 @@ interface GameConfig {
     val propWeightBomb: Int
 }
 
-enum class GameDifficulty(
-    val displayName: String,
-    val config: GameConfig,
-) {
-    
-    EASY("简单", EasyGameConfig),
-    NORMAL("普通", NormalGameConfig),
-    HARD("困难", HardGameConfig),
-}
-
 abstract class BaseGameConfig : GameConfig {
     
     override val worldWidth = 12f
@@ -146,12 +136,12 @@ object EasyGameConfig : BaseGameConfig() {
     override val bossEnemyHp: Int = 50
     override val enemyPower: Int = 1
     
-    override val enemyMinSpeed = 0.9f
-    override val enemyMaxSpeed = 1.3f
-    override val enemyBulletSpeed = 9f
+    override val enemyMinSpeed = 0.8f
+    override val enemyMaxSpeed = 1.2f
+    override val enemyBulletSpeed = 4f
     
     override val heroFireInterval = 0.20f
-    override val enemyFireInterval = 2.4f
+    override val enemyFireInterval = 2.40f
     override val enemySpawnInterval = 1.20f
 }
 
@@ -159,32 +149,32 @@ object NormalGameConfig : BaseGameConfig() {
     
     override val mobEnemyHp: Int = 3
     override val eliteEnemyHp: Int = 6
-    override val superEnemyHp: Int = 12
-    override val bossEnemyHp: Int = 80
+    override val superEnemyHp: Int = 10
+    override val bossEnemyHp: Int = 100
     override val enemyPower: Int = 1
     
     override val enemyMinSpeed = 1.0f
-    override val enemyMaxSpeed = 1.5f
-    override val enemyBulletSpeed = 10f
+    override val enemyMaxSpeed = 1.4f
+    override val enemyBulletSpeed = 6f
     
     override val heroFireInterval = 0.20f
-    override val enemyFireInterval = 2.0f
-    override val enemySpawnInterval = 1.0f
+    override val enemyFireInterval = 2.20f
+    override val enemySpawnInterval = 1.10f
 }
 
 object HardGameConfig : BaseGameConfig() {
     
     override val mobEnemyHp: Int = 5
-    override val eliteEnemyHp: Int = 10
-    override val superEnemyHp: Int = 20
-    override val bossEnemyHp: Int = 100
+    override val eliteEnemyHp: Int = 8
+    override val superEnemyHp: Int = 12
+    override val bossEnemyHp: Int = 200
     override val enemyPower: Int = 2
     
     override val enemyMinSpeed = 1.2f
-    override val enemyMaxSpeed = 1.8f
-    override val enemyBulletSpeed = 11f
+    override val enemyMaxSpeed = 1.6f
+    override val enemyBulletSpeed = 8f
     
     override val heroFireInterval = 0.20f
-    override val enemyFireInterval = 1.5f
-    override val enemySpawnInterval = 0.75f
+    override val enemyFireInterval = 2.00f
+    override val enemySpawnInterval = 1.00f
 }

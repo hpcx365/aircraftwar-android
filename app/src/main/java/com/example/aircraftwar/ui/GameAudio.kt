@@ -5,7 +5,8 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.SoundPool
 import com.example.aircraftwar.R
-import com.example.aircraftwar.engine.GameEvent
+import com.example.aircraftwar.engine.AudioEvent
+import com.example.aircraftwar.engine.FrameSnapshot
 
 class GameAudio(context: Context) {
     
@@ -46,7 +47,7 @@ class GameAudio(context: Context) {
     private var lastShootSoundAtMs = 0L
     private var lastHitSoundAtMs = 0L
     
-    fun sync(frame: FrameSnapshot, audioEvents: List<GameEvent>) {
+    fun sync(frame: FrameSnapshot, audioEvents: List<AudioEvent>) {
         audioEvents.forEach(::playEvent)
         val targetMode = when {
             hostPaused || frame.gameOver -> BgmMode.NONE
@@ -72,13 +73,13 @@ class GameAudio(context: Context) {
         soundPool.release()
     }
     
-    private fun playEvent(event: GameEvent) {
+    private fun playEvent(event: AudioEvent) {
         when (event) {
-            GameEvent.HERO_SHOOT -> playShootSound()
-            GameEvent.BULLET_HIT -> playHitSound()
-            GameEvent.PICKUP_PROP -> playOneShot(pickupSoundId, volume = 0.95f)
-            GameEvent.BOMB_TRIGGER -> playOneShot(bombSoundId, volume = 1.0f)
-            GameEvent.GAME_OVER -> {
+            AudioEvent.HERO_SHOOT -> playShootSound()
+            AudioEvent.BULLET_HIT -> playHitSound()
+            AudioEvent.PICKUP_PROP -> playOneShot(pickupSoundId, volume = 0.95f)
+            AudioEvent.BOMB_TRIGGER -> playOneShot(bombSoundId, volume = 1.0f)
+            AudioEvent.GAME_OVER -> {
                 updateBgm(BgmMode.NONE)
                 playOneShot(gameOverSoundId, volume = 1.0f)
             }
