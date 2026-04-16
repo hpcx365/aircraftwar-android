@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.aircraftwar"
+    namespace = "pers.hpcx.aircraftwar"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.aircraftwar"
+        applicationId = "pers.hpcx.aircraftwar"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

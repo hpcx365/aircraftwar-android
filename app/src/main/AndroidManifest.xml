@@ -6,11 +6,12 @@
 
     <application
         android:allowBackup="true"
-        android:label="Aircraft War"
+            android:icon="@drawable/hero_blue"
+            android:label="Aircraft War"
         android:supportsRtl="true"
         android:theme="@style/Theme.AircraftWar">
         <activity
-            android:name=".ui.MainActivity"
+                android:name=".client.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -19,13 +20,13 @@
             </intent-filter>
         </activity>
         <activity
-                android:name=".ui.DifficultySelectActivity"
+                android:name=".client.DifficultySelectActivity"
                 android:exported="false" />
         <activity
-                android:name=".ui.GameActivity"
+                android:name=".client.GameActivity"
                 android:exported="false" />
         <activity
-                android:name=".ui.LeaderboardActivity"
+                android:name=".client.LeaderboardActivity"
                 android:exported="false" />
     </application>
 
