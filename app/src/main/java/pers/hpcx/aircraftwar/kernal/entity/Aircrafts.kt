@@ -4,7 +4,6 @@ import pers.hpcx.aircraftwar.kernal.Vec
 
 data class RedHero(
     override val id: Int,
-    override val playerId: String,
     override val width: Float,
     override val height: Float,
     override var position: Vec,
@@ -22,7 +21,6 @@ data class RedHero(
 
 data class BlueHero(
     override val id: Int,
-    override val playerId: String,
     override val width: Float,
     override val height: Float,
     override var position: Vec,

@@ -38,6 +38,9 @@ class ClientNetworkTransferService(
     @Volatile
     private var connection: Connection? = null
     
+    @Volatile
+    private var running = true
+    
     override fun sendCommand(command: GameCommand) {
         touchDemand()
         TcpTransferProtocol.offerDroppingOldest(sendQueue, command)
@@ -54,7 +57,7 @@ class ClientNetworkTransferService(
     }
     
     private fun runConnectionManager() {
-        while (true) {
+        while (running) {
             try {
                 val now = System.currentTimeMillis()
                 val current = connection
@@ -101,12 +104,12 @@ class ClientNetworkTransferService(
     }
     
     private fun runSender() {
-        while (true) {
+        while (running) {
             try {
                 val command = sendQueue.take()
                 val payload = TcpTransferProtocol.encodeCommand(command)
                 
-                while (true) {
+                while (running) {
                     touchDemand()
                     val current = connection
                     if (current == null) {
@@ -174,5 +177,11 @@ class ClientNetworkTransferService(
             }
             Log.i(ClientNetworkTransferService::class.simpleName, "Disconnected from $server: $reason")
         }
+    }
+    
+    fun shutdown() {
+        running = false
+        connection?.let { closeConnection(it, "shutdown") }
+        executor.shutdownNow()
     }
 }

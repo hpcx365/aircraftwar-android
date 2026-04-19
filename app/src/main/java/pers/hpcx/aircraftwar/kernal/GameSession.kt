@@ -14,10 +14,11 @@ class GameSession(
     private var entityIdSeq = 0
     private val entities = linkedMapOf<Int, Entity>()
     
-    private var redHeroJoined = false
-    private var blueHeroJoined = false
     private var redHero: RedHero? = null
     private var blueHero: BlueHero? = null
+    
+    private var redPlayerId: String? = null
+    private var bluePlayerId: String? = null
     private var redScore: Int = 0
     private var blueScore: Int = 0
     
@@ -31,7 +32,7 @@ class GameSession(
     fun isOver(): Boolean {
         lock.readLock().lock()
         try {
-            return started && (!redHeroJoined || redHero == null) && (!blueHeroJoined || blueHero == null)
+            return started && (redPlayerId == null || redHero == null) && (bluePlayerId == null || blueHero == null)
         } finally {
             lock.readLock().unlock()
         }
@@ -65,9 +66,6 @@ class GameSession(
                 boundaryCleanup()
                 elapsedTimeSec += dt
             }
-            if (isOver()) {
-                emitEvent(AudioEvent.GAME_OVER)
-            }
         } finally {
             lock.writeLock().unlock()
         }
@@ -80,10 +78,13 @@ class GameSession(
                 worldWidth = config.worldWidth,
                 worldHeight = config.worldHeight,
                 difficulty = difficulty,
+                redPlayerId = redPlayerId,
+                bluePlayerId = bluePlayerId,
                 scoreRed = redScore,
                 scoreBlue = blueScore,
                 elapsedTimeSec = elapsedTimeSec,
                 hasBoss = entities.values.any { it is BossEnemy },
+                started = started,
                 gameOver = isOver(),
                 events = ArrayList(audioEvents),
                 entities = entities.values.map {
@@ -129,23 +130,23 @@ class GameSession(
                 }
                 is PlayerCommand -> when (command) {
                     is PlayerJoinRedCommand -> {
-                        if (!redHeroJoined && redPlayerCommand == null) {
+                        if (redPlayerId == null && redPlayerCommand == null) {
                             redPlayerCommand = command
                         }
                     }
                     is PlayerJoinBlueCommand -> {
-                        if (!blueHeroJoined && bluePlayerCommand == null) {
+                        if (bluePlayerId == null && bluePlayerCommand == null) {
                             bluePlayerCommand = command
                         }
                     }
                     else -> {
                         when (command.playerId) {
-                            redHero?.playerId -> {
+                            redPlayerId -> {
                                 if (command.sequence > (redPlayerCommand?.sequence ?: -1)) {
                                     redPlayerCommand = command
                                 }
                             }
-                            blueHero?.playerId -> {
+                            bluePlayerId -> {
                                 if (command.sequence > (bluePlayerCommand?.sequence ?: -1)) {
                                     bluePlayerCommand = command
                                 }
@@ -163,9 +164,9 @@ class GameSession(
     private fun applyRedPlayerCommand(command: PlayerCommand) {
         when (command) {
             is PlayerJoinRedCommand -> {
-                if (redHeroJoined) throw IllegalStateException()
-                redHeroJoined = true
-                createRedHero(command.playerId)
+                if (redPlayerId != null) throw IllegalStateException()
+                redPlayerId = command.playerId
+                createRedHero()
             }
             is PlayerJoinBlueCommand -> {
                 throw IllegalStateException()
@@ -181,6 +182,7 @@ class GameSession(
             is PlayerLeaveCommand -> {
                 val hero = redHero ?: return
                 unregisterEntity(hero)
+                if (!started) redPlayerId = null
             }
         }
     }
@@ -191,9 +193,9 @@ class GameSession(
                 throw IllegalStateException()
             }
             is PlayerJoinBlueCommand -> {
-                if (blueHeroJoined) throw IllegalStateException()
-                blueHeroJoined = true
-                createBlueHero(command.playerId)
+                if (bluePlayerId != null) throw IllegalStateException()
+                bluePlayerId = command.playerId
+                createBlueHero()
             }
             is PlayerMoveCommand -> {
                 val hero = blueHero ?: return
@@ -206,15 +208,15 @@ class GameSession(
             is PlayerLeaveCommand -> {
                 val hero = blueHero ?: return
                 unregisterEntity(hero)
+                if (!started) bluePlayerId = null
             }
         }
     }
     
-    private fun createRedHero(playerId: String): RedHero {
+    private fun createRedHero(): RedHero {
         return registerEntity(
             RedHero(
                 id = nextId(),
-                playerId = playerId,
                 width = config.heroWidth,
                 height = config.heroHeight,
                 position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
@@ -223,11 +225,10 @@ class GameSession(
         )
     }
     
-    private fun createBlueHero(playerId: String): BlueHero {
+    private fun createBlueHero(): BlueHero {
         return registerEntity(
             BlueHero(
                 id = nextId(),
-                playerId = playerId,
                 width = config.heroWidth,
                 height = config.heroHeight,
                 position = Vec(config.worldWidth * 0.5f, config.worldHeight * 0.2f),
@@ -591,6 +592,7 @@ class GameSession(
     }
     
     private fun resolveHeroBulletHitEnemy(bullet: HeroBullet, enemy: Enemy) {
+        if (bullet.unregistered) return
         unregisterEntity(bullet)
         enemyTakeDamage(
             enemy, bullet.power, when (bullet) {
@@ -602,12 +604,14 @@ class GameSession(
     }
     
     private fun resolveEnemyBulletHitHero(hero: Hero, bullet: EnemyBullet) {
+        if (bullet.unregistered) return
         unregisterEntity(bullet)
         heroTakeDamage(hero, bullet.power)
         emitEvent(AudioEvent.BULLET_HIT)
     }
     
     private fun resolvePropPickup(hero: Hero, prop: Prop) {
+        if (prop.unregistered) return
         unregisterEntity(prop)
         when (prop) {
             is HealthProp -> {
@@ -626,6 +630,7 @@ class GameSession(
                     .forEach { enemyTakeDamage(it, bombDamage, hero) }
                 entities.values
                     .filterIsInstance<EnemyBullet>()
+                    .filterNot { it.unregistered }
                     .forEach { unregisterEntity(it) }
                 emitEvent(AudioEvent.BOMB_TRIGGER)
             }
@@ -644,12 +649,14 @@ class GameSession(
     }
     
     private fun heroTakeDamage(hero: Hero, amount: Int) {
+        if (hero.unregistered) return
         if (hero.hp <= 0) return
         hero.hp = (hero.hp - amount).coerceAtLeast(0)
         if (hero.hp <= 0) unregisterEntity(hero)
     }
     
     private fun enemyTakeDamage(enemy: Enemy, amount: Int, damageSource: Hero?) {
+        if (enemy.unregistered) return
         if (enemy.hp <= 0) return
         enemy.hp = (enemy.hp - amount).coerceAtLeast(0)
         if (enemy.hp <= 0) {
@@ -746,6 +753,7 @@ class GameSession(
     private fun boundaryCleanup() {
         entities.values
             .filter { it.isOutOfWorld() }
+            .filterNot { it.unregistered }
             .forEach { unregisterEntity(it) }
     }
     
@@ -770,14 +778,18 @@ class GameSession(
         return obj
     }
     
-    private fun <T : Entity> unregisterEntity(obj: T) {
-        when (obj) {
-            is RedHero -> redHero = null
-            is BlueHero -> blueHero = null
-            else -> {}
+    private fun unregisterEntity(e: Entity) {
+        entities.remove(e.id) ?: throw IllegalArgumentException("entity not registered")
+        if (e is Hero) {
+            when (e) {
+                is RedHero -> redHero = null
+                is BlueHero -> blueHero = null
+            }
+            emitEvent(AudioEvent.GAME_OVER)
         }
-        entities.remove(obj.id)
     }
+    
+    private val Entity.unregistered: Boolean get() = entities[id] == null
     
     private fun emitEvent(event: AudioEvent) {
         audioEvents += event

@@ -46,7 +46,6 @@ sealed interface Aircraft : Entity {
 
 sealed interface Hero : Aircraft {
     
-    val playerId: String
     var enhanceTimer: Float
     var rampageTimer: Float
     var targetPosition: Vec?

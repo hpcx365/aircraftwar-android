@@ -1,16 +1,25 @@
 package pers.hpcx.aircraftwar.client
 
 import android.view.MotionEvent
-import pers.hpcx.aircraftwar.kernal.PlayerCommand
-import pers.hpcx.aircraftwar.kernal.PlayerMoveCommand
-import pers.hpcx.aircraftwar.kernal.PlayerStopCommand
-import pers.hpcx.aircraftwar.kernal.Vec
+import pers.hpcx.aircraftwar.kernal.*
 
 class PlayerController(
     private val playerId: String,
 ) {
     
     private var commandSequence = 1
+    
+    fun createJoinCommand(isHost: Boolean): PlayerCommand {
+        return if (isHost) {
+            PlayerJoinRedCommand(playerId, 0)
+        } else {
+            PlayerJoinBlueCommand(playerId, 0)
+        }
+    }
+    
+    fun createLeaveCommand(): PlayerLeaveCommand {
+        return PlayerLeaveCommand(playerId = playerId, sequence = commandSequence++)
+    }
     
     fun onMotionEvent(event: MotionEvent, viewport: WorldViewport): PlayerCommand? {
         return when (event.actionMasked) {

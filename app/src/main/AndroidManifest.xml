@@ -5,14 +5,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:allowBackup="true"
+            android:allowBackup="true"
             android:icon="@drawable/hero_blue"
             android:label="Aircraft War"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.AircraftWar">
+            android:supportsRtl="true"
+            android:usesCleartextTraffic="true"
+            android:theme="@style/Theme.AircraftWar">
         <activity
                 android:name=".client.MainActivity"
-            android:exported="true">
+                android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -20,7 +21,7 @@
             </intent-filter>
         </activity>
         <activity
-                android:name=".client.DifficultySelectActivity"
+                android:name=".client.LobbySearchActivity"
                 android:exported="false" />
         <activity
                 android:name=".client.GameActivity"

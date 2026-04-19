@@ -7,10 +7,13 @@ data class FrameSnapshot(
     val worldWidth: Float,
     val worldHeight: Float,
     val difficulty: GameDifficulty,
+    val redPlayerId: String? = null,
+    val bluePlayerId: String? = null,
     val scoreRed: Int,
     val scoreBlue: Int,
     val elapsedTimeSec: Float,
     val hasBoss: Boolean,
+    val started: Boolean,
     val gameOver: Boolean,
     val events: List<AudioEvent>,
     val entities: List<EntitySnapshot>,
@@ -20,10 +23,13 @@ data class FrameSnapshot(
         put("worldWidth", worldWidth)
         put("worldHeight", worldHeight)
         put("difficulty", difficulty.name)
+        if (redPlayerId != null) put("redPlayerId", redPlayerId)
+        if (bluePlayerId != null) put("bluePlayerId", bluePlayerId)
         put("scoreRed", scoreRed)
         put("scoreBlue", scoreBlue)
         put("elapsedTimeSec", elapsedTimeSec)
         put("hasBoss", hasBoss)
+        put("started", started)
         put("gameOver", gameOver)
         put("events", JSONArray().apply { for (event in events) put(event.name) })
         put("entities", JSONArray().apply { for (entity in entities) put(entity.toJson()) })
@@ -36,10 +42,13 @@ data class FrameSnapshot(
                 worldWidth = it.getDouble("worldWidth").toFloat(),
                 worldHeight = it.getDouble("worldHeight").toFloat(),
                 difficulty = GameDifficulty.valueOf(it.getString("difficulty")),
+                redPlayerId = it.optString("redPlayerId").ifBlank { null },
+                bluePlayerId = it.optString("bluePlayerId").ifBlank { null },
                 scoreRed = it.getInt("scoreRed"),
                 scoreBlue = it.getInt("scoreBlue"),
                 elapsedTimeSec = it.getDouble("elapsedTimeSec").toFloat(),
                 hasBoss = it.getBoolean("hasBoss"),
+                started = it.optBoolean("started", false),
                 gameOver = it.getBoolean("gameOver"),
                 events = it.getJSONArray("events").let { array ->
                     val events = mutableListOf<AudioEvent>()

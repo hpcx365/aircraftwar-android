@@ -7,8 +7,9 @@ import android.media.SoundPool
 import pers.hpcx.aircraftwar.R
 import pers.hpcx.aircraftwar.kernal.AudioEvent
 import pers.hpcx.aircraftwar.kernal.FrameSnapshot
+import java.util.concurrent.locks.ReentrantLock
 
-class GameAudio(context: Context) {
+class AudioController(context: Context) {
     
     private enum class BgmMode {
         NONE,
@@ -44,36 +45,55 @@ class GameAudio(context: Context) {
     
     private var currentBgmMode = BgmMode.NONE
     private var hostPaused = false
-    var musicEnabled = true
+    private val lock = ReentrantLock()
     
     fun sync(frame: FrameSnapshot, audioEvents: List<AudioEvent>) {
-        audioEvents.forEach(::playEvent)
-        val targetMode = when {
-            hostPaused || frame.gameOver -> BgmMode.NONE
-            frame.hasBoss -> BgmMode.BOSS
-            else -> BgmMode.NORMAL
+        lock.lock()
+        try {
+            audioEvents.forEach(::playEvent)
+            val targetMode = when {
+                hostPaused || frame.gameOver -> BgmMode.NONE
+                frame.hasBoss -> BgmMode.BOSS
+                else -> BgmMode.NORMAL
+            }
+            updateBgm(targetMode)
+        } finally {
+            lock.unlock()
         }
-        updateBgm(targetMode)
     }
     
     fun onHostPause() {
-        hostPaused = true
-        updateBgm(BgmMode.NONE)
+        lock.lock()
+        try {
+            hostPaused = true
+            updateBgm(BgmMode.NONE)
+        } finally {
+            lock.unlock()
+        }
     }
     
     fun onHostResume() {
-        hostPaused = false
+        lock.lock()
+        try {
+            hostPaused = false
+        } finally {
+            lock.unlock()
+        }
     }
     
     fun release() {
-        updateBgm(BgmMode.NONE)
-        normalBgm?.release()
-        bossBgm?.release()
-        soundPool.release()
+        lock.lock()
+        try {
+            updateBgm(BgmMode.NONE)
+            normalBgm?.release()
+            bossBgm?.release()
+            soundPool.release()
+        } finally {
+            lock.unlock()
+        }
     }
     
     private fun playEvent(event: AudioEvent) {
-        if (!musicEnabled) return
         when (event) {
             AudioEvent.HERO_SHOOT -> playOneShot(shootSoundId, volume = 0.65f)
             AudioEvent.BULLET_HIT -> playOneShot(bulletHitSoundId, volume = 0.72f)
@@ -97,12 +117,10 @@ class GameAudio(context: Context) {
             BgmMode.BOSS -> bossBgm.stopSafely()
             BgmMode.NONE -> Unit
         }
-        if (musicEnabled) {
-            when (targetMode) {
-                BgmMode.NORMAL -> normalBgm.startFromBeginning()
-                BgmMode.BOSS -> bossBgm.startFromBeginning()
-                BgmMode.NONE -> Unit
-            }
+        when (targetMode) {
+            BgmMode.NORMAL -> normalBgm.startFromBeginning()
+            BgmMode.BOSS -> bossBgm.startFromBeginning()
+            BgmMode.NONE -> Unit
         }
         currentBgmMode = targetMode
     }
